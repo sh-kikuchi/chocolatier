@@ -1,0 +1,115 @@
+# =====================================
+# Backend (Django / Python)
+# =====================================
+
+# Python bytecode
+**/__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+
+# Django local settings & database
+backend/local_settings.py
+backend/db.sqlite3
+backend/db.sqlite3-journal
+
+# Media files
+backend/media/
+
+# Build / distribution
+backend/build/
+backend/dist/
+backend/eggs/
+backend/.eggs/
+backend/wheels/
+backend/*.egg-info/
+backend/*.egg
+backend/MANIFEST
+backend/*.spec
+backend/*.manifest
+
+# Virtual environments
+backend/.venv/
+backend/env/
+backend/venv/
+backend/ENV/
+backend/env.bak/
+backend/venv.bak/
+backend/.Python
+
+# Test / coverage
+backend/.tox/
+backend/.nox/
+backend/.coverage
+backend/.coverage.*
+backend/.pytest_cache/
+backend/cover/
+backend/coverage.xml
+backend/nosetests.xml
+backend/*.cover
+backend/*.py,cover
+backend/.hypothesis/
+
+# Python package tools
+backend/.pdm.toml
+backend/__pypackages__/
+
+# Misc / caches
+backend/.cache/
+backend/.webassets-cache/
+backend/.scrapy/
+backend/docs/_build/
+backend/.pybuilder/
+backend/target/
+backend/.ipynb_checkpoints/
+backend/profile_default/
+backend/ipython_config.py
+backend/cython_debug/
+
+# IDE / Editor
+# .idea/   # Uncomment if using PyCharm
+backend/.spyderproject
+backend/.spyproject
+backend/.ropeproject
+backend/.mypy_cache/
+backend/.dmypy.json
+backend/dmypy.json
+backend/.pyre/
+backend/.pytype/
+
+# Celery
+backend/celerybeat-schedule
+backend/celerybeat.pid
+
+# Environment variables
+backend/.env
+
+# =====================================
+# Frontend (React / Node.js)
+# =====================================
+
+# Dependencies
+frontend/node_modules/
+frontend/node_modules.*      # Yarn Plug'n'Play
+frontend/.pnp/
+frontend/.pnp.js
+
+# Build / production
+frontend/build/
+
+# Test / coverage
+frontend/coverage/
+
+# Environment variables
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Misc
+frontend/.DS_Store

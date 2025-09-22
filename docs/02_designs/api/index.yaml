@@ -1,0 +1,240 @@
+openapi: 3.0.3
+info:
+  title: Chocolatier API
+  version: 1.0.0
+  description: |
+    Django + SimpleJWT を用いた認証 API。  
+    - サインアップ（新規登録）  
+    - アクセストークン発行  
+    - ログインユーザー情報取得  
+    - アクセストークン更新  
+    - ファイルアップロード  
+    - Snap 一覧・登録・更新・削除  
+
+servers:
+  - url: http://127.0.0.1:8000
+
+tags:
+  - name: Auth
+    description: 認証関連のAPI
+  - name: Snap
+    description: Snap関連のAPI
+
+paths:
+  /chocolatier_api/signup/:
+    post:
+      tags: [Auth]
+      summary: ユーザー登録
+      description: 新しいユーザーを作成します。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - email
+                - password
+              properties:
+                username:
+                  type: string
+                  example: alice2
+                email:
+                  type: string
+                  format: email
+                  example: alice2@example.com
+                password:
+                  type: string
+                  format: password
+                  example: your-secret-password
+      responses:
+        "201":
+          description: ユーザーが正常に作成されました
+        "400":
+          description: 入力値エラー
+
+  /token/:
+    post:
+      tags: [Auth]
+      summary: アクセストークン発行
+      description: ユーザー名とパスワードを使ってアクセストークンとリフレッシュトークンを取得します。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: alice
+                password:
+                  type: string
+                  format: password
+                  example: your-secret-password
+      responses:
+        "200":
+          description: トークンが発行されました
+        "401":
+          description: 認証エラー
+
+  /chocolatier_api/user-info/:
+    get:
+      tags: [Auth]
+      summary: ユーザー情報取得
+      description: アクセストークンを用いてログイン中のユーザー情報を取得します。
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: ユーザー情報が取得されました
+        "401":
+          description: 認証エラー
+
+  /token/refresh/:
+    post:
+      tags: [Auth]
+      summary: アクセストークン更新
+      description: リフレッシュトークンを使用して新しいアクセストークンを取得します。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh
+              properties:
+                refresh:
+                  type: string
+      responses:
+        "200":
+          description: 新しいアクセストークンが発行されました
+        "401":
+          description: 認証エラー
+
+  /chocolatier_api/files/upload/:
+    post:
+      tags: [Snap]
+      summary: ファイルアップロード
+      description: 認証ユーザーがファイルをアップロードします。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - upload
+                - name
+              properties:
+                upload:
+                  type: string
+                  format: binary
+                  description: アップロードするファイル
+                name:
+                  type: string
+                  example: サンプル画像
+      responses:
+        "201":
+          description: ファイルが正常にアップロードされました
+        "400":
+          description: 入力値エラー
+        "401":
+          description: 認証エラー
+
+  /chocolatier_api/snap/:
+    get:
+      tags: [Snap]
+      summary: Snap一覧
+      description: 登録されている Snap をすべて取得します。
+      responses:
+        "200":
+          description: Snap 一覧
+    post:
+      tags: [Snap]
+      summary: Snap登録
+      description: 新しい Snap を作成します。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Snap'
+      responses:
+        "201":
+          description: Snap が作成されました
+
+  /chocolatier_api/snap/{id}/:
+    put:
+      tags: [Snap]
+      summary: Snap更新
+      description: 指定した Snap を更新します。
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Snap'
+      responses:
+        "200":
+          description: Snap が更新されました
+    delete:
+      tags: [Snap]
+      summary: Snap削除
+      description: 指定した Snap を削除します。
+      parameters:
+        - in: query
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Snap が削除されました
+        "404":
+          description: Snap が存在しません
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Snap:
+      type: object
+      required:
+        - user
+        - file
+        - comment
+      properties:
+        id:
+          type: integer
+          example: 1
+        user:
+          type: integer
+          example: 1
+        file:
+          type: integer
+          example: 1
+        comment:
+          type: string
+          example: これはcurlからのテストです
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-08-30T12:34:56Z"

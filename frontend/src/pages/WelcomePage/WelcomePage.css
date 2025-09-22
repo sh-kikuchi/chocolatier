@@ -1,0 +1,38 @@
+.welcomeContainer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: '#f44336';
+  text-align: center;
+}
+
+.welcomeLogo img {
+  width: 150px;
+}
+
+.welcomeTitle {
+  font-size: 2rem;
+  margin-bottom: 10px;
+}
+
+.welcomeSubtitle {
+  font-size: 1rem;
+  margin-bottom: 30px;
+}
+
+hr {
+  width: 80%;
+  border: 0;
+  border-top: 1px dotted black;
+  margin: 10px 0;
+}
+
+.welcomeContainer p {
+  max-width: 600px;
+  margin: 5 auto;
+  line-height: 1.6;
+  font-size: 16px;
+  color: #333;
+  text-align: center;
+}
