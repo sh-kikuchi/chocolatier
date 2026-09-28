@@ -26,7 +26,10 @@ class SnapCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Snap
-        fields = ['id','user', 'comment', 'upload', 'filePath']  # file は upload から自動生成
+        # - file は upload から自動生成
+        # - user はフロントから受け取らない（views.py の SnapCreate.perform_create で
+        #   ログインユーザーを渡す）。受け取るとなりすまし投稿ができてしまうため
+        fields = ['id', 'comment', 'upload', 'filePath']
 
     def create(self, validated_data):
         upload = validated_data.pop('upload')

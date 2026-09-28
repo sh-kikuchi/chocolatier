@@ -1,4 +1,5 @@
 import styles from './SnapshotPanel.module.css';
+import { MEDIA_URL } from '../../../api/client';  // 画像の URL は client.ts で一元管理
 
 interface Photo {
   id: number;
@@ -13,8 +14,6 @@ interface SnapshotPanelProps {
 }
 
 function SnapshotPanel({ prmPhoto, indexNum, onclickAction }: SnapshotPanelProps) {
-  const MEDIA_URL = "http://localhost:8000/media/";
-
   return (
     <div className={styles.snapshotPanel} onClick={onclickAction}>
       <img

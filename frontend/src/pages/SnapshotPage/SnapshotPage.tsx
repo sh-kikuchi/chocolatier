@@ -6,7 +6,8 @@ import BasicButton from '../../components/commons/BasicButton/BasicButton';
 import Modal from '../../components/commons/Modal/Modal';
 import LongText from '../../components/commons/LongText/LongText';
 import FileInput from '../../components/commons/FileInput/FileInput';
-import axios from 'axios';
+import axios from 'axios';  // エラー判定（axios.isAxiosError）にだけ使う
+import client, { MEDIA_URL } from '../../api/client';  // API 呼び出しは共通の client を使う
 
 // スナップの型定義
 interface Snap {
@@ -17,8 +18,6 @@ interface Snap {
 
 // Snapshotページのメインコンポーネント
 function SnapshotPage() {
-  const BASE_URL = 'http://localhost:8000';
-
   // =====================================================
   // 状態管理
   // =====================================================
@@ -66,26 +65,16 @@ function SnapshotPage() {
   };
 
   // =====================================================
-  // API共通設定
-  // =====================================================
-  const authHeaders = (isFormData: boolean = false) => {
-    const token = localStorage.getItem('access_token');
-    return isFormData
-      ? { Authorization: `Bearer ${token}` }
-      : { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-  };
-
-  // =====================================================
   // データ取得・初期化
   // - fetchSnaps は useCallback でメモ化 → 不要な再生成を防ぐ
   // - useEffect で初回マウント時に実行 → スナップ一覧を取得
   // - 依存配列に fetchSnaps を指定することで、fetchSnaps が変わった場合のみ再実行
+  // - 認証は Cookie で自動送信されるので、ヘッダーの指定は不要
+  //   （以前は localStorage のトークンを Authorization ヘッダーに付けていた）
   // =====================================================
   const fetchSnaps = useCallback(async () => {
     try {
-      const response = await axios.get(`${BASE_URL}/chocolatier_api/snap/`, {
-        headers: authHeaders(),
-      });
+      const response = await client.get('/chocolatier_api/snap/');
       setSnaps(response.data);
     } catch (error) {
       handleApiError(error);
@@ -103,21 +92,15 @@ function SnapshotPage() {
   const handleCreateSubmit = async () => {
     if (!file) return alert('ファイルは必須です');
 
-    const token = localStorage.getItem('access_token');
-    const decoded = decodeJWT(token || '');
-
+    // FormData を渡すと、axios が Content-Type（multipart/form-data）を自動で付ける
     const formData = new FormData();
     formData.append('comment', text);
     formData.append('upload', file);
-    formData.append('user', decoded.user_id);
+    // user は送らない（サーバーがログインユーザーを設定する。なりすまし防止）
 
     try {
-      const response = await axios.post(
-        `${BASE_URL}/chocolatier_api/snap/create/`,
-        formData,
-        { headers: authHeaders(true) }
-      );
-      setSnaps((prev) => [...prev, response.data]);
+      const response = await client.post('/chocolatier_api/snap/create/', formData);
+      setSnaps((prev) => [response.data, ...prev]);  // 一覧は新しい順なので先頭に追加
       closeModal();
     } catch (error) {
       handleApiError(error);
@@ -128,14 +111,12 @@ function SnapshotPage() {
   const handleUpdateSubmit = async () => {
     if (!snap) return;
 
-    const formData = new FormData();
-    formData.append('comment', text);
-
     try {
-      const response = await axios.patch(
-        `${BASE_URL}/chocolatier_api/snap/${snap.id}/`,
-        formData,
-        { headers: authHeaders() }
+      // コメントだけなので JSON で送る
+      // （以前は FormData なのに Content-Type: application/json を付けていた）
+      const response = await client.patch(
+        `/chocolatier_api/snap/${snap.id}/`,
+        { comment: text }
       );
 
       setSnaps((prevSnaps) =>
@@ -154,9 +135,7 @@ function SnapshotPage() {
     if (!window.confirm('本当に削除しますか？')) return;
 
     try {
-      await axios.delete(`${BASE_URL}/chocolatier_api/snap/${snap.id}/`, {
-        headers: authHeaders(),
-      });
+      await client.delete(`/chocolatier_api/snap/${snap.id}/`);
       setSnaps((prevSnaps) => prevSnaps.filter((s) => s.id !== snap.id));
       closeModal();
     } catch (error) {
@@ -166,34 +145,14 @@ function SnapshotPage() {
 
   // =====================================================
   // エラーハンドリング
+  // - 401（ログイン切れ）は client.ts が refresh を試し、
+  //   それでもダメなら ProtectedRoute がサインイン画面へ移動させるので、ここでは扱わない
   // =====================================================
   const handleApiError = (error: unknown) => {
     if (axios.isAxiosError(error)) {
-      if (error.response?.status === 401) window.location.href = '/signin';
-      else console.error('APIエラー:', error.response?.data);
+      console.error('APIエラー:', error.response?.data);
     } else {
       console.error('想定外のエラー:', error);
-    }
-  };
-
-  // =====================================================
-  // JWTデコード
-  // =====================================================
-  const decodeJWT = (token: string): any | null => {
-    if (!token) return null;
-    try {
-      const payload = token.split('.')[1];
-      const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split('')
-          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      );
-      return JSON.parse(jsonPayload);
-    } catch (err) {
-      console.error('JWTデコード失敗', err);
-      return null;
     }
   };
 
@@ -245,7 +204,7 @@ function SnapshotPage() {
             {(file || snap) && (
               <img
                 className="filePreview"
-                src={previewUrl ? previewUrl : `${BASE_URL}/media/${snap?.filePath}`}
+                src={previewUrl ? previewUrl : `${MEDIA_URL}${snap?.filePath}`}
                 alt="preview"
               />
             )}
