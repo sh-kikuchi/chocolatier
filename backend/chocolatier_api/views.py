@@ -13,7 +13,7 @@ from django.utils.decorators import method_decorator               # 関数用�
 from django.views.decorators.csrf import ensure_csrf_cookie        # csrftoken Cookie を必ず発行するデコレーター
 from rest_framework import generics, status                        # generics: 一覧・詳細などの定型 View / status: HTTP ステータスコード
 from rest_framework.exceptions import AuthenticationFailed         # 認証失敗の例外（パスワード違いなど）
-from rest_framework.permissions import AllowAny, IsAuthenticated   # AllowAny: 誰でも可 / IsAuthenticated: ログイン必須
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser  # AllowAny: 誰でも可 / IsAuthenticated: ログイン必須
 from rest_framework.response import Response                       # API のレスポンス（JSON）を返すクラス
 from rest_framework.views import APIView                           # 自分で get / post を書く基本の View
 from rest_framework_simplejwt.exceptions import TokenError         # JWT が不正・期限切れのときの例外
@@ -100,14 +100,20 @@ class SnapCreate(generics.CreateAPIView):
 # =========================================================
 # UserSignup
 # - post: ユーザー新規登録
-# - 未ログインで使う API なので、認証・権限の両方を外す
+# - サインアップ画面は作らず、運用で Postman からユーザーを作るために使う
+# - 管理者（is_staff=True のユーザー）だけが使える
+#   - createsuperuser で作ったユーザーは is_staff=True
+#   - この API で作ったユーザーは is_staff=False（一般ユーザー）
+# - 以前は authentication_classes = [] / AllowAny で、誰でも登録できてしまっていた
 # =========================================================
 class UserSignup(APIView):
-    # authentication_classes = [] : Cookie の JWT を読まない
-    #   → 期限切れの Cookie が残っていても 401 にならず、登録できる
-    # permission_classes = [AllowAny] : ログインしていなくても使える
-    authentication_classes = []
-    permission_classes = [AllowAny]
+    # authentication_classes を書かない → settings.py の CookieJWTAuthentication が使われる
+    #   （誰がリクエストしたかを知る必要があるため、認証は外さない）
+    # IsAdminUser：
+    #   - 未ログイン           → 401
+    #   - ログイン中だが一般ユーザー → 403
+    #   - ログイン中の管理者      → 登録できる
+    permission_classes = [IsAdminUser]
 
     def post(self, request):
         serializer = UserSerializer(data=request.data)

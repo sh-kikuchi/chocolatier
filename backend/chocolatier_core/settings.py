@@ -114,7 +114,11 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+# 言語設定
+# - 'ja' にすると、DRF / Django 標準のエラーメッセージが日本語になる
+#   例：「この項目は必須です。」「有効な画像をアップロードしてください。」
+# - 管理画面（/admin/）も日本語表示になる
+LANGUAGE_CODE = 'ja'
 
 TIME_ZONE = 'UTC'
 
@@ -195,3 +199,20 @@ SIMPLE_JWT = {
 # ファイルアップロード用
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# =========================================================
+# 入力チェックの上限値（serializers.py で使用）
+# - フロントの src/utils/validators.ts でも同じ値を使うので、変えるときは両方そろえる
+# - 数字を serializers.py に直書きせず、ここにまとめることで変更漏れを防ぐ
+# =========================================================
+# アップロード画像の最大サイズ（バイト）
+# - 5 * 1024 * 1024 = 5MB（要件定義書「画像サイズ制限：最大 5MB / 枚」）
+MAX_UPLOAD_SIZE = 5 * 1024 * 1024
+
+# アップロードを許可する拡張子（小文字で書く。大文字の .JPG も通る）
+ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+
+# コメントの最大文字数
+# - モデルは TextField（上限なし）のまま、シリアライザーで制限する
+#   → DB の構造は変わらないので、マイグレーションは不要
+MAX_COMMENT_LENGTH = 1000

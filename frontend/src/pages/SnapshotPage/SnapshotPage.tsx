@@ -6,8 +6,10 @@ import BasicButton from '../../components/commons/BasicButton/BasicButton';
 import Modal from '../../components/commons/Modal/Modal';
 import LongText from '../../components/commons/LongText/LongText';
 import FileInput from '../../components/commons/FileInput/FileInput';
-import axios from 'axios';  // エラー判定（axios.isAxiosError）にだけ使う
+import Message from '../../components/commons/Message/Message';
 import client, { MEDIA_URL } from '../../api/client';  // API 呼び出しは共通の client を使う
+import { getApiErrorMessages } from '../../utils/apiError';
+import { MAX_COMMENT_LENGTH, validateComment } from '../../utils/validators';
 
 // スナップの型定義
 interface Snap {
@@ -26,6 +28,7 @@ function SnapshotPage() {
   const [showModal, setShowModal] = useState(false);   // モーダル開閉状態
   const [text, setText] = useState('');                // コメント入力
   const [file, setFile] = useState<File | null>(null); // 新規作成用ファイル
+  const [errorMessages, setErrorMessages] = useState<string[]>([]); // モーダルに出すエラー
 
   // =====================================================
   // ファイルプレビューURLの生成とクリーンアップ
@@ -55,6 +58,7 @@ function SnapshotPage() {
     } else {
       setSnap(null);
     }
+    setErrorMessages([]);  // 前回のエラーを残さない
     setShowModal(true);
   };
 
@@ -62,6 +66,7 @@ function SnapshotPage() {
     setShowModal(false);
     setFile(null);
     setText('');
+    setErrorMessages([]);
   };
 
   // =====================================================
@@ -77,7 +82,8 @@ function SnapshotPage() {
       const response = await client.get('/chocolatier_api/snap/');
       setSnaps(response.data);
     } catch (error) {
-      handleApiError(error);
+      // 一覧の取得失敗はモーダルの外なので、ログだけ出す
+      console.error('一覧の取得に失敗しました:', error);
     }
   }, []);
 
@@ -90,7 +96,12 @@ function SnapshotPage() {
   // =====================================================
   // 新規作成
   const handleCreateSubmit = async () => {
-    if (!file) return alert('ファイルは必須です');
+    // 送る前のチェック（画像の形式・サイズは FileInput で選択時にチェック済み）
+    const errors = [
+      !file ? '画像を選択してください' : null,
+      validateComment(text),
+    ].filter((message): message is string => message !== null);
+    if (errors.length > 0 || !file) return setErrorMessages(errors);
 
     // FormData を渡すと、axios が Content-Type（multipart/form-data）を自動で付ける
     const formData = new FormData();
@@ -110,6 +121,10 @@ function SnapshotPage() {
   // 更新
   const handleUpdateSubmit = async () => {
     if (!snap) return;
+
+    // 送る前のチェック
+    const commentError = validateComment(text);
+    if (commentError) return setErrorMessages([commentError]);
 
     try {
       // コメントだけなので JSON で送る
@@ -145,15 +160,14 @@ function SnapshotPage() {
 
   // =====================================================
   // エラーハンドリング
+  // - API のエラー（400 の入力チェックなど）をモーダル内に表示する
+  //   例：{"upload": ["画像サイズは5MB以下にしてください"]} → 「画像：画像サイズは5MB以下にしてください」
   // - 401（ログイン切れ）は client.ts が refresh を試し、
-  //   それでもダメなら ProtectedRoute がサインイン画面へ移動させるので、ここでは扱わない
+  //   それでもダメなら ProtectedRoute がサインイン画面へ移動させる
   // =====================================================
   const handleApiError = (error: unknown) => {
-    if (axios.isAxiosError(error)) {
-      console.error('APIエラー:', error.response?.data);
-    } else {
-      console.error('想定外のエラー:', error);
-    }
+    console.error('APIエラー:', error);
+    setErrorMessages(getApiErrorMessages(error));
   };
 
   // =====================================================
@@ -215,6 +229,18 @@ function SnapshotPage() {
               onChangeText={setText}
               rows={5}
             />
+            {/* 文字数カウンター：上限を超えたら赤くする */}
+            <div
+              className="commentCounter"
+              style={text.length > MAX_COMMENT_LENGTH ? { color: '#c62828' } : undefined}
+            >
+              {text.length} / {MAX_COMMENT_LENGTH}
+            </div>
+
+            {/* エラーメッセージ（送る前のチェック・API のエラー） */}
+            {errorMessages.map((message) => (
+              <Message key={message} message={message} mode="error" />
+            ))}
 
             <div>
               <BasicButton

@@ -1,6 +1,7 @@
 from rest_framework import serializers #シリアライザーをインポート
+from django.conf import settings                             # settings.py の上限値を読むため
+from django.core.validators import FileExtensionValidator    # 拡張子チェック用の Django 標準バリデーター
 from .models import Snap, User, File
-from .models import File
 from datetime import datetime
 import os
 
@@ -21,7 +22,10 @@ class SnapSerializer(serializers.ModelSerializer):
 # スナップモデルの新規作成用シリアライザー
 # =========================================================
 class SnapCreateSerializer(serializers.ModelSerializer):
-    upload = serializers.FileField(write_only=True)  # 新規作成時に必須
+    upload = serializers.ImageField(
+        write_only=True,  # 受け取るだけで、レスポンスには含めない
+        validators=[FileExtensionValidator(allowed_extensions=settings.ALLOWED_IMAGE_EXTENSIONS)],
+    )
     filePath = serializers.CharField(source='file.path', read_only=True)  # レスポンス用に追加
 
     class Meta:
@@ -30,6 +34,26 @@ class SnapCreateSerializer(serializers.ModelSerializer):
         # - user はフロントから受け取らない（views.py の SnapCreate.perform_create で
         #   ログインユーザーを渡す）。受け取るとなりすまし投稿ができてしまうため
         fields = ['id', 'comment', 'upload', 'filePath']
+        # extra_kwargs：モデルから自動で作られるフィールドに、オプションを追加する
+        # - comment はモデルが TextField（上限なし）なので、ここで最大文字数を付ける
+        # - 超えると「この値は 1000 文字以下でなければなりません。」のようなエラーになる
+        extra_kwargs = {
+            'comment': {'max_length': settings.MAX_COMMENT_LENGTH},
+        }
+    
+    # ---------------------------------------------------------
+    # validate_<フィールド名>：そのフィールドだけの独自チェック（チェック順 ③）
+    # - value には、①② を通過した後の値（アップロードされたファイル）が入る
+    # - 問題があれば ValidationError を発生させる → 400 で {"upload": ["..."]} が返る
+    # - 問題がなければ、value をそのまま return する（return を忘れると None になる）
+    # ---------------------------------------------------------
+    def validate_upload(self,value):
+        # value.size：ファイルサイズ（バイト）
+        if value.size > settings.MAX_UPLOAD_SIZE:
+            max_mb = settings.MAX_UPLOAD_SIZE // (1024 * 1024)  # 表示用に MB に直す
+            raise serializers.ValidationError(f'画像サイズは{max_mb}MB以下にしてください')
+        return value
+
 
     def create(self, validated_data):
         upload = validated_data.pop('upload')
@@ -51,6 +75,10 @@ class SnapUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Snap
         fields = ['comment']  # コメントだけ更新
+        # 新規作成（SnapCreateSerializer）と同じ上限にする
+        extra_kwargs = {
+            'comment': {'max_length': settings.MAX_COMMENT_LENGTH},
+        }
 
 # =========================================================
 # スナップ削除用シリアライザー
