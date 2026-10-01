@@ -7,6 +7,7 @@ import Modal from '../../components/commons/Modal/Modal';
 import LongText from '../../components/commons/LongText/LongText';
 import FileInput from '../../components/commons/FileInput/FileInput';
 import Message from '../../components/commons/Message/Message';
+import TagInput from '../../components/commons/TagInput/TagInput';
 import client, { MEDIA_URL } from '../../api/client';  // API 呼び出しは共通の client を使う
 import { getApiErrorMessages } from '../../utils/apiError';
 import { MAX_COMMENT_LENGTH, validateComment } from '../../utils/validators';
@@ -16,6 +17,7 @@ interface Snap {
   id: number;
   comment: string;
   filePath: string;
+  tags: string[];  // 付いているタグ名の配列（例：["カフェ", "旅行"]）
 }
 
 // Snapshotページのメインコンポーネント
@@ -29,6 +31,9 @@ function SnapshotPage() {
   const [text, setText] = useState('');                // コメント入力
   const [file, setFile] = useState<File | null>(null); // 新規作成用ファイル
   const [errorMessages, setErrorMessages] = useState<string[]>([]); // モーダルに出すエラー
+  const [tags, setTags] = useState<string[]>([]);                   // モーダルで編集中のタグ
+  const [tagOptions, setTagOptions] = useState<string[]>([]);       // 絞り込みの候補（自分が使っているタグ）
+  const [selectedTag, setSelectedTag] = useState<string | null>(null); // 絞り込み中のタグ（null は「すべて」）
 
   // =====================================================
   // ファイルプレビューURLの生成とクリーンアップ
@@ -55,8 +60,10 @@ function SnapshotPage() {
     if (prmSnap) {
       setSnap(prmSnap);
       setText(prmSnap.comment);
+      setTags(prmSnap.tags);
     } else {
       setSnap(null);
+      setTags([]);
     }
     setErrorMessages([]);  // 前回のエラーを残さない
     setShowModal(true);
@@ -66,30 +73,57 @@ function SnapshotPage() {
     setShowModal(false);
     setFile(null);
     setText('');
+    setTags([]);
     setErrorMessages([]);
   };
 
   // =====================================================
   // データ取得・初期化
   // - fetchSnaps は useCallback でメモ化 → 不要な再生成を防ぐ
-  // - useEffect で初回マウント時に実行 → スナップ一覧を取得
-  // - 依存配列に fetchSnaps を指定することで、fetchSnaps が変わった場合のみ再実行
+  // - 依存配列に selectedTag を入れているので、絞り込みのタグが変わると
+  //   fetchSnaps が作り直され、下の useEffect が一覧を取り直す
   // - 認証は Cookie で自動送信されるので、ヘッダーの指定は不要
   //   （以前は localStorage のトークンを Authorization ヘッダーに付けていた）
   // =====================================================
   const fetchSnaps = useCallback(async () => {
     try {
-      const response = await client.get('/chocolatier_api/snap/');
+      // params：axios が URL の ?tag=〇〇 を作ってくれる（日本語も自動でエンコードされる）
+      // - 「すべて」のときは params を空にして、絞り込まない
+      const response = await client.get('/chocolatier_api/snap/', {
+        params: selectedTag ? { tag: selectedTag } : {},
+      });
       setSnaps(response.data);
     } catch (error) {
       // 一覧の取得失敗はモーダルの外なので、ログだけ出す
       console.error('一覧の取得に失敗しました:', error);
     }
-  }, []);
+  }, [selectedTag]);
 
   useEffect(() => {
     fetchSnaps();
   }, [fetchSnaps]);
+
+  // 絞り込みの候補（自分の Snap に付いているタグ）を取得する
+  // - 初回と、作成・更新・削除のあと（タグが増減するため）に呼ぶ
+  const fetchTags = useCallback(async () => {
+    try {
+      const response = await client.get<string[]>('/chocolatier_api/tags/');
+      setTagOptions(response.data);
+      // 絞り込み中のタグが、どの Snap からも外れて候補から消えたら「すべて」に戻す
+      // （そのままだと、0 件の一覧が表示されたままになるため）
+      setSelectedTag((prev) => (prev && !response.data.includes(prev) ? null : prev));
+    } catch (error) {
+      console.error('タグの取得に失敗しました:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTags();
+  }, [fetchTags]);
+
+  // 作成・更新したスナップが、今の絞り込みに合うか
+  // - 「すべて」のときは常に合う
+  const matchesFilter = (target: Snap) => !selectedTag || target.tags.includes(selectedTag);
 
   // =====================================================
   // CRUD操作
@@ -107,11 +141,19 @@ function SnapshotPage() {
     const formData = new FormData();
     formData.append('comment', text);
     formData.append('upload', file);
+    // tags は同じキーで繰り返し入れる（tags=旅行 & tags=カフェ）
+    // - Backend の ListField が、同じキーの値をまとめて配列として受け取る
+    // - タグがなければ何も入れない（Backend では「タグなし」になる）
+    tags.forEach((tag) => formData.append('tags', tag));
     // user は送らない（サーバーがログインユーザーを設定する。なりすまし防止）
 
     try {
       const response = await client.post('/chocolatier_api/snap/create/', formData);
-      setSnaps((prev) => [response.data, ...prev]);  // 一覧は新しい順なので先頭に追加
+      // 一覧は新しい順なので先頭に追加（絞り込みに合わないときは追加しない）
+      if (matchesFilter(response.data)) {
+        setSnaps((prev) => [response.data, ...prev]);
+      }
+      fetchTags();  // 新しいタグが増えたかもしれないので、候補を取り直す
       closeModal();
     } catch (error) {
       handleApiError(error);
@@ -127,16 +169,22 @@ function SnapshotPage() {
     if (commentError) return setErrorMessages([commentError]);
 
     try {
-      // コメントだけなので JSON で送る
-      // （以前は FormData なのに Content-Type: application/json を付けていた）
-      const response = await client.patch(
+      // 画像は変えないので JSON で送る
+      // - tags は配列のまま送る。空の配列 [] なら、タグをすべて外す
+      const response = await client.patch<Snap>(
         `/chocolatier_api/snap/${snap.id}/`,
-        { comment: text }
+        { comment: text, tags }
       );
 
+      // レスポンスは一覧と同じ形（id・filePath・tags なども入っている）なので、そのまま置き換える
+      // - 絞り込み中のタグを外したときは、一覧から取り除く
+      const updated = response.data;
       setSnaps((prevSnaps) =>
-        prevSnaps.map((s) => (s.id === snap.id ? { ...s, ...response.data } : s))
+        matchesFilter(updated)
+          ? prevSnaps.map((s) => (s.id === updated.id ? updated : s))
+          : prevSnaps.filter((s) => s.id !== updated.id)
       );
+      fetchTags();  // タグが増減したかもしれないので、候補を取り直す
       closeModal();
     } catch (error) {
       handleApiError(error);
@@ -152,6 +200,7 @@ function SnapshotPage() {
     try {
       await client.delete(`/chocolatier_api/snap/${snap.id}/`);
       setSnaps((prevSnaps) => prevSnaps.filter((s) => s.id !== snap.id));
+      fetchTags();  // そのタグを使っていた最後の Snap なら、候補から消える
       closeModal();
     } catch (error) {
       handleApiError(error);
@@ -187,6 +236,27 @@ function SnapshotPage() {
     <Container className="container">
       <div>
         <BasicButton onclickAction={() => openModal()}>新規作成</BasicButton>
+
+        {/* タグの絞り込み：「すべて」＋自分が使っているタグをチップで並べる */}
+        <div className="tagFilter">
+          <button
+            type="button"
+            className={`tagFilterChip ${selectedTag === null ? 'tagFilterChipActive' : ''}`}
+            onClick={() => setSelectedTag(null)}
+          >
+            すべて
+          </button>
+          {tagOptions.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              className={`tagFilterChip ${selectedTag === tag ? 'tagFilterChipActive' : ''}`}
+              onClick={() => setSelectedTag(tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
 
         <div className="flexArea">
           {snaps.map((snap, index) => (
@@ -235,6 +305,11 @@ function SnapshotPage() {
               style={text.length > MAX_COMMENT_LENGTH ? { color: '#c62828' } : undefined}
             >
               {text.length} / {MAX_COMMENT_LENGTH}
+            </div>
+
+            {/* タグ：Enter で追加・× で削除。値（tags）はこのページが持つ */}
+            <div className="modalTagArea">
+              <TagInput tags={tags} onChangeTags={setTags} />
             </div>
 
             {/* エラーメッセージ（送る前のチェック・API のエラー） */}

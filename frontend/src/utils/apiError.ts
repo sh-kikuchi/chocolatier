@@ -13,6 +13,17 @@ import axios from 'axios';
 const FIELD_LABELS: Record<string, string> = {
   upload: '画像',
   comment: 'コメント',
+  tags: 'タグ',
+};
+
+// エラーの値を、メッセージ（文字列）の配列にする
+// - 普通は ["..."] の配列
+// - tags のような配列の項目で、要素ごとのエラーになると { "0": ["..."] } のようなオブジェクトになる
+//   （"0" は何番目のタグか）。中身を取り出して、ふつうの配列にそろえる
+const flattenMessages = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.flatMap(flattenMessages);
+  if (value && typeof value === 'object') return Object.values(value).flatMap(flattenMessages);
+  return [String(value)];
 };
 
 export const getApiErrorMessages = (error: unknown): string[] => {
@@ -41,9 +52,9 @@ export const getApiErrorMessages = (error: unknown): string[] => {
   // ① { フィールド名: [メッセージ, ...] } の形
   if (data && typeof data === 'object') {
     const messages = Object.entries(data).flatMap(([field, value]) => {
-      const list = Array.isArray(value) ? value : [value];  // 念のため配列でない場合にも対応
+      const list = flattenMessages(value);  // 配列でない・入れ子の場合にも対応
       const label = FIELD_LABELS[field];
-      return list.map((message) => (label ? `${label}：${message}` : String(message)));
+      return list.map((message) => (label ? `${label}：${message}` : message));
     });
     if (messages.length > 0) return messages;
   }
