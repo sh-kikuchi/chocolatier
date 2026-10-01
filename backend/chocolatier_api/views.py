@@ -19,7 +19,7 @@ from rest_framework.views import APIView                           # 自分で g
 from rest_framework_simplejwt.exceptions import TokenError         # JWT が不正・期限切れのときの例外
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer  # ログイン用 / refresh 用のトークン発行処理
 
-from .models import Snap
+from .models import Snap,Tag
 from .serializers import (
     SnapSerializer,
     SnapCreateSerializer,
@@ -39,12 +39,26 @@ class SnapList(generics.ListAPIView):
     serializer_class = SnapSerializer
 
     # 一覧に出すデータを決めるメソッド
-    # - 以前は queryset = Snap.objects.all() で「全ユーザーの全投稿」を返していた
-    # - self.request.user は、authentication.py の CookieJWTAuthentication が
-    #   Cookie の JWT から特定したログインユーザー
-    # - order_by('-created_at') の「-」は降順（新しい順）
     def get_queryset(self):
-        return Snap.objects.filter(user=self.request.user).order_by('-created_at')
+        # ① 自分の Snap を新しい順で取得（File と tags はまとめて取得して N+1 を防ぐ）
+        #    - self.request.user は、Cookie の JWT から特定したログインユーザー
+        queryset = (
+            Snap.objects
+            .filter(user=self.request.user)
+            .select_related('file')   # 多対1：JOIN で一緒に取る
+            .prefetch_related('tags') # 多対多：別の SQL 1 回で取る
+            .order_by('-created_at')
+        )
+
+        # ② URL の ?tag=〇〇 を読む（例：/snaps/?tag=旅行 → "旅行"、指定なしなら None）
+        tag =self.request.query_params.get('tag')
+
+        # ③ tag が指定されていたら、そのタグが付いた Snap だけに絞る
+        #    - tags__name：Snap → tags → name の順にたどる（__ で関連先の項目を指定する）
+        if tag:
+            queryset = queryset.filter(tags__name=tag)
+
+        return queryset
 
 # =========================================================
 # SnapDetail
@@ -96,6 +110,25 @@ class SnapCreate(generics.CreateAPIView):
     # - ここでサーバー側のログインユーザーを渡すことで、なりすましを防ぐ
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+# =========================================================
+# TagList
+# - get: 自分の Snap に付いているタグ一覧：/tags/（例：["カフェ", "旅行"]）
+# =========================================================
+class TagList(APIView):
+    def get(self, request):
+        # ① 自分の Snap に付いているタグだけ（他の人のタグは出さない）
+        # ② distinct：同じタグが複数の Snap に付いていても 1 つにする
+        # ③ values_list：名前だけの配列にする
+        names = (
+            Tag.objects
+            .filter(snaps__user=request.user)
+            .distinct()
+            .values_list('name', flat=True)
+        )
+        return Response(list(names))
+
+
 
 # =========================================================
 # UserSignup

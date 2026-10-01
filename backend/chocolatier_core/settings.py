@@ -216,3 +216,12 @@ ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp']
 # - モデルは TextField（上限なし）のまま、シリアライザーで制限する
 #   → DB の構造は変わらないので、マイグレーションは不要
 MAX_COMMENT_LENGTH = 1000
+
+# 1 つの Snap に付けられるタグの最大数
+# - 空のタグと重複を除いた「後」の個数で数える（serializers.py の clean_tag_names）
+MAX_TAGS_PER_SNAP = 10
+
+# タグ 1 つの最大文字数
+# - models.py の Tag.name（max_length=30）と同じ値にする
+#   （モデル側は DB の列の長さ、こちらはシリアライザーでの入力チェック用）
+MAX_TAG_LENGTH = 30

@@ -10,6 +10,7 @@ from .views import (
     SnapList,
     SnapCreate,
     SnapDetail,
+    TagList,
     UserSignup,
     UserInfoView,
     # FileUpload,  # 削除予定（FileSerializer が未定義で動かないため無効化）
@@ -24,6 +25,8 @@ urlpatterns = [
        # - <int:pk> は URL の数字部分を pk（主キー）として View に渡す
        # - 他人のスナップの pk を指定すると 404
        path('snap/<int:pk>/',SnapDetail.as_view(), name='snap-detail'),
+    # GET : 自分の Snap に付いているタグの一覧（絞り込みの候補）
+       path('tags/', TagList.as_view(), name='tag-list'),
        # POST: ユーザー新規登録（ログイン不要）
        path('signup/', UserSignup.as_view(), name='user-signup'),
        # GET : ログイン中のユーザー情報（フロントの AuthContext が起動時に呼ぶ）
