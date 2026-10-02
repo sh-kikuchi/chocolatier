@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import '../SnapshotPage/SnapshotPage.css';
 import SnapshotPanel from '../../components/snap/SnapshotPanel/SnapshotPanel';
 import Container from '../../components/commons/Container/Container';
@@ -11,14 +11,8 @@ import TagInput from '../../components/commons/TagInput/TagInput';
 import client, { MEDIA_URL } from '../../api/client';  // API 呼び出しは共通の client を使う
 import { getApiErrorMessages } from '../../utils/apiError';
 import { MAX_COMMENT_LENGTH, validateComment } from '../../utils/validators';
-
-// スナップの型定義
-interface Snap {
-  id: number;
-  comment: string;
-  filePath: string;
-  tags: string[];  // 付いているタグ名の配列（例：["カフェ", "旅行"]）
-}
+import { Snap, SnapPage } from '../../types/Snap';
+import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 
 // Snapshotページのメインコンポーネント
 function SnapshotPage() {
@@ -34,6 +28,8 @@ function SnapshotPage() {
   const [tags, setTags] = useState<string[]>([]);                   // モーダルで編集中のタグ
   const [tagOptions, setTagOptions] = useState<string[]>([]);       // 絞り込みの候補（自分が使っているタグ）
   const [selectedTag, setSelectedTag] = useState<string | null>(null); // 絞り込み中のタグ（null は「すべて」）
+  const [nextUrl, setNextUrl] = useState<string | null>(null); // 続きを取る URL（null なら最後まで読んだ）
+  const [loading, setLoading] = useState(false);               // 一覧を読み込み中か
 
   // =====================================================
   // ファイルプレビューURLの生成とクリーンアップ
@@ -78,30 +74,69 @@ function SnapshotPage() {
   };
 
   // =====================================================
-  // データ取得・初期化
-  // - fetchSnaps は useCallback でメモ化 → 不要な再生成を防ぐ
-  // - 依存配列に selectedTag を入れているので、絞り込みのタグが変わると
-  //   fetchSnaps が作り直され、下の useEffect が一覧を取り直す
+  // データ取得・初期化（12 件ずつ）
+  // - 最初の 12 件：初回とタグを切り替えたときに取り直す
+  // - 続き：一覧の一番下が見えたら、nextUrl の続きを取って後ろに足す
   // - 認証は Cookie で自動送信されるので、ヘッダーの指定は不要
-  //   （以前は localStorage のトークンを Authorization ヘッダーに付けていた）
   // =====================================================
-  const fetchSnaps = useCallback(async () => {
-    try {
-      // params：axios が URL の ?tag=〇〇 を作ってくれる（日本語も自動でエンコードされる）
-      // - 「すべて」のときは params を空にして、絞り込まない
-      const response = await client.get('/chocolatier_api/snap/', {
-        params: selectedTag ? { tag: selectedTag } : {},
-      });
-      setSnaps(response.data);
-    } catch (error) {
-      // 一覧の取得失敗はモーダルの外なので、ログだけ出す
-      console.error('一覧の取得に失敗しました:', error);
-    }
-  }, [selectedTag]);
 
+  // ① 何回目のリクエストかを数える
+  //    - 読み込み中にタグを切り替えると、古いタグの結果があとから届くことがある
+  //    - 最後に出したリクエストの結果だけを使うために、番号で見分ける
+  //    - useRef：値が変わっても再描画しない。画面に出さない値の保存に使う
+  const requestIdRef = useRef(0);
+
+  // ② 1 ページ分を取得して、一覧に反映する（③と④で使う共通の処理）
+  //    - append=false：一覧を置き換える（最初の 12 件）
+  //    - append=true ：一覧の後ろに足す（続き）
+  const fetchPage = useCallback(
+    async (url: string, params: Record<string, string>, append: boolean) => {
+      // ②-1 このリクエストの番号を取る
+      const requestId = ++requestIdRef.current;
+      setLoading(true);
+      try {
+        // ②-2 取得する
+        //      - params：axios が URL の ?tag=〇〇 を作ってくれる（日本語も自動でエンコードされる）
+        const response = await client.get<SnapPage>(url, { params });
+
+        // ②-3 待っている間に、新しいリクエストが出ていたら捨てる
+        if (requestId !== requestIdRef.current) return;
+
+        // ②-4 一覧と、続きの URL を反映する
+        setSnaps((prev) => (append ? [...prev, ...response.data.results] : response.data.results));
+        setNextUrl(response.data.next);
+      } catch (error) {
+        // ②-5 失敗したら、自動での読み込みを止める
+        //      - nextUrl を残すと、目印が見えている間ずっと失敗をくり返してしまうため
+        //      - 一覧の取得失敗はモーダルの外なので、ログだけ出す
+        console.error('一覧の取得に失敗しました:', error);
+        if (requestId === requestIdRef.current) setNextUrl(null);
+      } finally {
+        // ②-6 最後に出したリクエストのときだけ、読み込み中を解除する
+        if (requestId === requestIdRef.current) setLoading(false);
+      }
+    },
+    []
+  );
+
+  // ③ 最初の 12 件（初回と、タグを切り替えたとき）
+  //    - 前のタグの一覧と続きの URL を消してから取り直す
+  //    - 「すべて」のときは params を空にして、絞り込まない
   useEffect(() => {
-    fetchSnaps();
-  }, [fetchSnaps]);
+    setSnaps([]);
+    setNextUrl(null);
+    fetchPage('/chocolatier_api/snap/', selectedTag ? { tag: selectedTag } : {}, false);
+  }, [selectedTag, fetchPage]);
+
+  // ④ 続きの 12 件（一覧の一番下が見えたとき）
+  //    - nextUrl には cursor と tag がすでに入っているので、params は空でよい
+  const loadMore = useCallback(() => {
+    if (!nextUrl || loading) return;
+    fetchPage(nextUrl, {}, true);
+  }, [nextUrl, loading, fetchPage]);
+
+  // ⑤ 一覧の一番下の目印を監視する（続きがあって、読み込み中でないときだけ）
+  const sentinelRef = useInfiniteScroll(loadMore, nextUrl !== null && !loading);
 
   // 絞り込みの候補（自分の Snap に付いているタグ）を取得する
   // - 初回と、作成・更新・削除のあと（タグが増減するため）に呼ぶ
@@ -261,13 +296,17 @@ function SnapshotPage() {
         <div className="flexArea">
           {snaps.map((snap, index) => (
             <SnapshotPanel
-              key={index}
+              key={snap.id}
               prmPhoto={snap}
               indexNum={index}
               onclickAction={() => openModal(snap)}
             />
           ))}
         </div>
+
+        {/* 無限スクロールの目印：これが画面に入ったら続きを読み込む */}
+        <div ref={sentinelRef} className="scrollSentinel" />
+        {loading && <p className="loadingText">読み込み中...</p>}
       </div>
 
       <Modal show={showModal} setShow={closeModal}>

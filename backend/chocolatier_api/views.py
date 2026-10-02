@@ -20,6 +20,7 @@ from rest_framework_simplejwt.exceptions import TokenError         # JWT が不�
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer  # ログイン用 / refresh 用のトークン発行処理
 
 from .models import Snap,Tag
+from .pagination import SnapCursorPagination
 from .serializers import (
     SnapSerializer,
     SnapCreateSerializer,
@@ -37,6 +38,11 @@ from .serializers import (
 # =========================================================
 class SnapList(generics.ListAPIView):
     serializer_class = SnapSerializer
+
+    # 12 件ずつ返す（pagination.py の SnapCursorPagination）
+    # - レスポンスが配列から { next, previous, results } の形に変わる
+    # - ?tag=〇〇 は next の URL にそのまま引き継がれる（絞り込んだまま続きを取れる）
+    pagination_class = SnapCursorPagination
 
     # 一覧に出すデータを決めるメソッド
     def get_queryset(self):
