@@ -7,5 +7,6 @@
   // - 同梱版（6.x）だと tsconfig の target: es5 などが非推奨として警告される
   // - ビルド（react-scripts）と同じ版で型チェックするため
   "typescript.tsdk": "frontend/node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "js/ts.tsdk.path": "frontend/node_modules/typescript/lib"
 }
