@@ -25,6 +25,7 @@
   - [5. 開発の順番](#5-開発の順番)
     - [■ 基本の順番：データに近い層から](#-基本の順番データに近い層から)
     - [■ 例：改修案件3（タグ）の順番](#-例改修案件3タグの順番)
+    - [■ 例：改修案件4（無限スクロール）の順番](#-例改修案件4無限スクロールの順番)
   - [6. よく使うコマンド](#6-よく使うコマンド)
 
 
@@ -88,6 +89,7 @@ backend/
     ├── serializers.py        … JSON ⇔ Python の変換と入力チェック
     ├── views.py              … API の窓口
     ├── urls.py               … アプリ内の URL
+    ├── pagination.py         … 一覧を何件ずつ返すか（自作。改修案件4）
     ├── authentication.py     … Cookie の JWT で「誰か」を判定する（自作）
     ├── admin.py              … 管理画面の設定
     ├── apps.py               … アプリの設定（普段は触らない）
@@ -103,6 +105,7 @@ backend/
 | `chocolatier_core/urls.py` | URL の入口 | アプリ全体に関わる URL（ログインなど）を追加するとき |
 | `chocolatier_api/urls.py` | アプリ内の URL | API を追加するとき |
 | `views.py` | 窓口 | API の処理の流れ・権限を変えるとき |
+| `pagination.py` | 区切り方 | 一覧の件数や並び順、ページングの方式を変えるとき |
 | `authentication.py` | 誰かを判定 | 認証方式を変えるとき |
 | `serializers.py` | 翻訳係 | レスポンスの形、受け取る項目、入力チェックを変えるとき |
 | `models.py` | 設計図 | 表・列・関係を追加・変更するとき（→ マイグレーションが必要） |
@@ -220,10 +223,11 @@ path('snap/<int:pk>/', SnapDetail.as_view()),  # <int:pk> の数字が View に�
 | 3 | `chocolatier_api/urls.py` | `snap/` に一致 → `SnapList` へ |
 | 4 | `authentication.py` | `access_token` Cookie を検証 → `request.user` = alice |
 | 5 | `views.py`（権限） | `IsAuthenticated` → ログイン中なので OK |
-| 6 | `views.py`（`get_queryset`） | `Snap.objects.filter(user=alice).order_by('-created_at')` |
-| 7 | `models.py` → DB | SQL が発行されて、alice の Snap を取得する |
-| 8 | `serializers.py` | Snap のオブジェクト → JSON（`id`・`filePath`・`comment` など） |
-| 9 | ミドルウェア → ブラウザ | CORS ヘッダーを付けて、200 で返す |
+| 6 | `views.py`（`get_queryset`） | `Snap.objects.filter(user=alice)`。`?tag=` があればタグで絞る |
+| 7 | `pagination.py` | 新しい順に並べて、12 件だけに区切る（続きの URL `next` も作る） |
+| 8 | `models.py` → DB | SQL が発行されて、alice の Snap を取得する（file・tags はまとめて取る） |
+| 9 | `serializers.py` | Snap のオブジェクト → JSON（`id`・`filePath`・`comment`・`tags` など）。`{next, previous, results}` に包む |
+| 10 | ミドルウェア → ブラウザ | CORS ヘッダーを付けて、200 で返す |
 
 ### ■ 例2：画像を投稿する（POST）
 `POST /chocolatier_api/snap/create/`（multipart：upload, comment）
@@ -275,6 +279,20 @@ path('snap/<int:pk>/', SnapDetail.as_view()),  # <int:pk> の数字が View に�
 | 4 | B3 | `serializers.py` | レスポンスに `tags: ["旅行"]` を出す。作成・更新でタグを受け取る |
 | 5 | B4 | `views.py` → `urls.py` | `?tag=` での絞り込みと、`tags/` の API を追加する |
 | 6 | F1〜 | フロントエンド | タグ入力と、絞り込みのチップを作る |
+
+- 詳しくは [10_tags.md](10_tags.md)。
+
+### ■ 例：改修案件4（無限スクロール）の順番
+- 表や列は変わらないので、models・マイグレーション・admin は飛ばして、View のまわりから作る。
+
+| 順番 | Step | 層 | 理由 |
+|---|---|---|---|
+| 1 | B1 | `pagination.py`（新規） | 「12 件ずつ・新しい順」のルールを決める |
+| 2 | B2 | `views.py` | `SnapList` に B1 のルールを付ける。レスポンスの形が変わる |
+| 3 | — | curl / API 画面 | `next` をたどって、重複や抜けがないか確かめる |
+| 4 | F1〜 | フロントエンド | `next` を使って続きを読み込む（返ってくる形が決まってから作る） |
+
+- 詳しくは [11_infiniteScroll.md](11_infiniteScroll.md)。
 
 
 ## 6. よく使うコマンド
