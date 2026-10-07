@@ -299,8 +299,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SnapPage'
-        "400":
-          description: cursor が不正
+        "404":
+          description: cursor が不正（DRF は NotFound として返す）
           content:
             application/json:
               schema:
