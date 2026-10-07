@@ -322,6 +322,11 @@ function SnapshotPage() {
 
             <h2>{snap ? 'スナップ詳細' : 'スナップ作成'}</h2>
 
+            {/* エラーメッセージ（送る前のチェック・API のエラー） */}
+            {errorMessages.map((message) => (
+              <Message key={message} message={message} mode="error" />
+            ))}
+
             {!snap && <FileInput onUploadFile={handleFileUpload} />}
 
             {(file || snap) && (
@@ -350,12 +355,6 @@ function SnapshotPage() {
             <div className="modalTagArea">
               <TagInput tags={tags} onChangeTags={setTags} />
             </div>
-
-            {/* エラーメッセージ（送る前のチェック・API のエラー） */}
-            {errorMessages.map((message) => (
-              <Message key={message} message={message} mode="error" />
-            ))}
-
             <div>
               <BasicButton
                 type="submit"

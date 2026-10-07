@@ -47,6 +47,8 @@ function FileInput({ onUploadFile }: FileInputProps) {
 
   return (
     <div>
+      {/* ドロップでは accept が効かないので、ここでのエラー表示が必要 */}
+      {error && <Message message={error} mode="error" />}
       <div className={styles.inputFile}>
         <div
           className={styles.dropArea}
@@ -82,8 +84,6 @@ function FileInput({ onUploadFile }: FileInputProps) {
           </div>
         </div>
       </div>
-      {/* ドロップでは accept が効かないので、ここでのエラー表示が必要 */}
-      {error && <Message message={error} mode="error" />}
     </div>
   );
 }
