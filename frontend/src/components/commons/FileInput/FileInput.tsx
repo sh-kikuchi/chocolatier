@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import styles from './FileInput.module.css';
 import Message from '../Message/Message';
-import { IMAGE_ACCEPT, validateImageFile } from '../../../utils/validators';
+import { IMAGE_ACCEPT, validateImageExtension } from '../../../utils/validators';
 
 type FileInputProps = {
   onUploadFile: (file: File) => void;  // チェックを通過したファイルだけが渡される
@@ -13,9 +13,10 @@ function FileInput({ onUploadFile }: FileInputProps) {
   const [error, setError] = useState<string | null>(null);  // チェックのエラーメッセージ
 
   // ファイル処理ロジック（ドロップ・選択両方で使用）
-  // - 形式・サイズをチェックし、問題があればエラーを表示して親には渡さない
+  // - 形式（拡張子）をチェックし、問題があればエラーを表示して親には渡さない
+  // - サイズはここではチェックしない（切り抜くと小さくなるため。送る前に親がチェックする）
   const handleFileSelect = (file: File) => {
-    const message = validateImageFile(file);
+    const message = validateImageExtension(file);
     setError(message);
     if (message) return;
     onUploadFile(file);

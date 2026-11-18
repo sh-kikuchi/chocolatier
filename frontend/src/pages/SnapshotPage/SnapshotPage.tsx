@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import '../SnapshotPage/SnapshotPage.css';
 import SnapshotPanel from '../../components/snap/SnapshotPanel/SnapshotPanel';
 import Container from '../../components/commons/Container/Container';
@@ -8,9 +8,10 @@ import LongText from '../../components/commons/LongText/LongText';
 import FileInput from '../../components/commons/FileInput/FileInput';
 import Message from '../../components/commons/Message/Message';
 import TagInput from '../../components/commons/TagInput/TagInput';
+import ImageCropper from '../../components/commons/ImageCropper/ImageCropper';
 import client, { MEDIA_URL } from '../../api/client';  // API 呼び出しは共通の client を使う
-import { getApiErrorMessages } from '../../utils/apiError';
-import { MAX_COMMENT_LENGTH, validateComment } from '../../utils/validators';
+import { getApiErrorMessages, getApiErrorMessagesFromBlob } from '../../utils/apiError';
+import { MAX_COMMENT_LENGTH, MAX_ZIP_DOWNLOAD, validateComment, validateImageSize } from '../../utils/validators';
 import { Snap, SnapPage } from '../../types/Snap';
 import { useInfiniteScroll } from '../../hooks/useInfiniteScroll';
 
@@ -23,33 +24,55 @@ function SnapshotPage() {
   const [snap, setSnap] = useState<Snap | null>();     // モーダルで選択中のスナップ
   const [showModal, setShowModal] = useState(false);   // モーダル開閉状態
   const [text, setText] = useState('');                // コメント入力
-  const [file, setFile] = useState<File | null>(null); // 新規作成用ファイル
+  // 新規作成の画像は 2 段階で持つ（改修案件6：アップロード前の 1:1 トリミング）
+  // - sourceFile：選んだ元の画像（トリミング前）
+  // - file：トリミングした後の画像（これを送る）
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [errorMessages, setErrorMessages] = useState<string[]>([]); // モーダルに出すエラー
   const [tags, setTags] = useState<string[]>([]);                   // モーダルで編集中のタグ
   const [tagOptions, setTagOptions] = useState<string[]>([]);       // 絞り込みの候補（自分が使っているタグ）
   const [selectedTag, setSelectedTag] = useState<string | null>(null); // 絞り込み中のタグ（null は「すべて」）
   const [nextUrl, setNextUrl] = useState<string | null>(null); // 続きを取る URL（null なら最後まで読んだ）
   const [loading, setLoading] = useState(false);               // 一覧を読み込み中か
+  const [downloading, setDownloading] = useState(false);       // Zip をダウンロード中か（連打防止）
+  // Zip ダウンロードの結果のお知らせ（モーダルの外なので、errorMessages とは別に持つ）
+  // - mode：info（100 件を超えたお知らせ）／ error（失敗）
+  const [downloadNotice, setDownloadNotice] = useState<{ messages: string[]; mode: 'info' | 'error' } | null>(null);
 
   // =====================================================
   // ファイルプレビューURLの生成とクリーンアップ
-  // - file が変わるたび新しい previewUrl を生成（useMemo）
-  // - 古い URL は useEffect で破棄（メモリリーク防止）
-  // - useState と違い、更新関数（setter）は不要
+  // - file（トリミング後）が変わるたび、新しい previewUrl を作り、古い URL は破棄する（メモリリーク防止）
+  // - 作る処理と破棄する処理を、同じ useEffect の中に書く
+  //   以前は useMemo で作って useEffect で破棄していたが、StrictMode では開発中に
+  //   useEffect が「実行 → 後片付け → 実行」と 2 回動くため、破棄済みの URL が残って
+  //   プレビューが表示されなかった（ImageCropper の ② と同じ）
   // =====================================================
-  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
-
-    useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   // =====================================================
   // ファイル選択・モーダル操作
   // =====================================================
-  const handleFileUpload = useCallback((selectedFile: File | null) => {
-    setFile(selectedFile);
+  // 画像を選んだとき：元画像として持ち、トリミング画面を出す（前のトリミング結果は消す）
+  const handleFileUpload = useCallback((selectedFile: File) => {
+    setSourceFile(selectedFile);
+    setFile(null);
+  }, []);
+
+  // 画像を選び直す（トリミング画面の「選び直す」・プレビューの「画像を選び直す」）
+  // - 2 つの状態を両方戻す（片方だけだと、古い画像が残る）
+  const resetImage = useCallback(() => {
+    setSourceFile(null);
+    setFile(null);
   }, []);
 
   const openModal = (prmSnap?: Snap) => {
@@ -67,7 +90,7 @@ function SnapshotPage() {
 
   const closeModal = () => {
     setShowModal(false);
-    setFile(null);
+    resetImage();
     setText('');
     setTags([]);
     setErrorMessages([]);
@@ -165,9 +188,12 @@ function SnapshotPage() {
   // =====================================================
   // 新規作成
   const handleCreateSubmit = async () => {
-    // 送る前のチェック（画像の形式・サイズは FileInput で選択時にチェック済み）
+    // 送る前のチェック
+    // - 形式（拡張子）は FileInput で、選んだときにチェック済み
+    // - サイズは、トリミングした後の画像でここでチェックする（大きな写真も、切り抜けば投稿できるため）
     const errors = [
-      !file ? '画像を選択してください' : null,
+      !file ? (sourceFile ? '画像の範囲を「決定」してください' : '画像を選択してください') : null,
+      file ? validateImageSize(file) : null,
       validateComment(text),
     ].filter((message): message is string => message !== null);
     if (errors.length > 0 || !file) return setErrorMessages(errors);
@@ -243,6 +269,67 @@ function SnapshotPage() {
   };
 
   // =====================================================
+  // Zip ダウンロード
+  // - 表示中の Snap（絞り込み＋無限スクロールで読み込んだ分）の画像を Zip で保存する
+  // - Zip を作るのは Backend。ここでは ID を送って、返ってきた Zip を保存させるだけ
+  // =====================================================
+  const handleDownload = async () => {
+    // ① ダウンロード中・0 件なら何もしない（ボタンも押せなくしているが、念のため）
+    if (downloading || snaps.length === 0) return;
+
+    // ② 送る ID を集める
+    //    - snaps は新しい順なので、先頭から 100 件 ＝ 新しい順に 100 件
+    //    - Backend でも 101 件以上は 400 にしている（こちらは送る前に合わせるため）
+    const ids = snaps.slice(0, MAX_ZIP_DOWNLOAD).map((s) => s.id);
+    const folderName = selectedTag ?? 'すべて';
+
+    setDownloading(true);
+    setDownloadNotice(null);  // 前回のお知らせを消す
+    try {
+      // ③ Zip を受け取る
+      //    - responseType: 'blob'：中身を文字ではなく、ファイル（Blob）のまま受け取る
+      //      付けないと axios が文字として読もうとして、Zip が壊れる
+      //    - 「すべて」のときは tag を送らない（Backend がフォルダ名を「すべて」にする）
+      const response = await client.post<Blob>(
+        '/chocolatier_api/snap/download/',
+        selectedTag ? { ids, tag: selectedTag } : { ids },
+        { responseType: 'blob' }
+      );
+
+      // ④ 保存させる
+      //    - createObjectURL：Blob に一時的な URL を付ける（previewUrl と同じ仕組み）
+      //    - <a download="名前"> をクリックすると、ブラウザがその名前で保存する
+      //    - ファイル名はここで決める（サーバーの Content-Disposition は、
+      //      CORS の設定を足さないと JS から読めないため）
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${folderName}.zip`;
+      document.body.appendChild(link);  // ブラウザによっては、ページに置かないと click が効かない
+      link.click();
+      link.remove();
+
+      // ⑤ 一時的な URL を破棄する（メモリリーク防止）
+      URL.revokeObjectURL(url);
+
+      // ⑥ 100 件を超えていたら、全部は入っていないことを知らせる
+      if (snaps.length > MAX_ZIP_DOWNLOAD) {
+        setDownloadNotice({
+          messages: [`表示中の ${snaps.length} 枚のうち、新しい順に ${MAX_ZIP_DOWNLOAD} 枚をダウンロードしました`],
+          mode: 'info',
+        });
+      }
+    } catch (error) {
+      // ⑦ 失敗したら、ボタンの下にエラーを出す
+      //    - エラーの本文も Blob で届くので、読んでから変換する
+      console.error('Zip のダウンロードに失敗しました:', error);
+      setDownloadNotice({ messages: await getApiErrorMessagesFromBlob(error), mode: 'error' });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  // =====================================================
   // エラーハンドリング
   // - API のエラー（400 の入力チェックなど）をモーダル内に表示する
   //   例：{"upload": ["画像サイズは5MB以下にしてください"]} → 「画像：画像サイズは5MB以下にしてください」
@@ -255,24 +342,46 @@ function SnapshotPage() {
   };
 
   // =====================================================
-  // クリーンアップ（ファイルURLの解放）
-  // - file が変わるたび新しい previewUrl を生成する。
-  // =====================================================
-  useEffect(() => {
-    return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    };
-  }, [previewUrl]);
-
-  // =====================================================
   // JSXレンダリング
   // =====================================================
   return (
     <Container className="container">
       <div>
-        <BasicButton onclickAction={() => openModal()}>新規作成</BasicButton>
+        {/* 1 段目：新規作成（左）と Zip ダウンロード（右）
+            - Zip のボタンの文字に、選んでいるタグ名と枚数を入れて、「今の絞り込みで表示中の一覧」が
+              対象だとわかるようにする（タグを切り替える・スクロールで読み込むと変わる）
+            - 0 件・ダウンロード中は押せない */}
+        <div className="snapActions">
+          <BasicButton onclickAction={() => openModal()}>新規作成</BasicButton>
+          <div className="downloadArea">
+            {/* 100 件を超えたら、全部は入らないことを先に知らせる */}
+            {snaps.length > MAX_ZIP_DOWNLOAD && (
+              <span className="downloadNote">
+                表示中の {snaps.length} 枚のうち、新しい {MAX_ZIP_DOWNLOAD} 枚まで
+              </span>
+            )}
+            <BasicButton
+              onclickAction={handleDownload}
+              disabled={snaps.length === 0 || downloading}
+            >
+              {downloading
+                ? 'Zip を作成中...'
+                : `${selectedTag ? `「${selectedTag}」` : 'すべて'}の ${Math.min(snaps.length, MAX_ZIP_DOWNLOAD)} 枚を Zip でダウンロード`}
+            </BasicButton>
+          </div>
+        </div>
 
-        {/* タグの絞り込み：「すべて」＋自分が使っているタグをチップで並べる */}
+        {/* Zip ダウンロードの結果（100 件を超えたお知らせは 5 秒で消す。エラーは残す） */}
+        {downloadNotice?.messages.map((message) => (
+          <Message
+            key={message}
+            message={message}
+            mode={downloadNotice.mode}
+            duration={downloadNotice.mode === 'info' ? 5000 : undefined}
+          />
+        ))}
+
+        {/* 2 段目：タグの絞り込み：「すべて」＋自分が使っているタグをチップで並べる */}
         <div className="tagFilter">
           <button
             type="button"
@@ -327,14 +436,25 @@ function SnapshotPage() {
               <Message key={message} message={message} mode="error" />
             ))}
 
-            {!snap && <FileInput onUploadFile={handleFileUpload} />}
+            {/* 新規作成の画像：① 選ぶ → ② トリミング → ③ プレビュー の順に切り替える */}
+            {!snap && !sourceFile && <FileInput onUploadFile={handleFileUpload} />}
+            {!snap && sourceFile && !file && (
+              <ImageCropper file={sourceFile} onConfirm={setFile} onCancel={resetImage} />
+            )}
+            {!snap && file && previewUrl && (
+              <div>
+                <img className="filePreview filePreviewLarge" src={previewUrl} alt="preview" />
+                <div>
+                  <button type="button" className="reselectImageButton" onClick={resetImage}>
+                    画像を選び直す
+                  </button>
+                </div>
+              </div>
+            )}
 
-            {(file || snap) && (
-              <img
-                className="filePreview"
-                src={previewUrl ? previewUrl : `${MEDIA_URL}${snap?.filePath}`}
-                alt="preview"
-              />
+            {/* 詳細（更新）：画像は変えられないので、登録済みの画像を表示するだけ */}
+            {snap && (
+              <img className="filePreview filePreviewLarge" src={`${MEDIA_URL}${snap.filePath}`} alt="preview" />
             )}
 
             <LongText

@@ -6,12 +6,10 @@
 # =========================================================
 from django.contrib import admin
 from django.urls import path, include
-from django.conf import settings                  # DEBUG / MEDIA_URL / MEDIA_ROOT を読むため
-from django.conf.urls.static import static        # 開発中にアップロード画像を配信するため
 # 認証まわりの View（Cookie に JWT を出し入れする）
 # - 以前は simplejwt 標準の TokenObtainPairView / TokenRefreshView を使っていたが、
 #   それらはトークンをレスポンス本文で返すため、Cookie 版に差し替えた
-from chocolatier_api.views import CookieLoginView, CookieRefreshView, LogoutView, CsrfView
+from chocolatier_api.views import CookieLoginView, CookieRefreshView, LogoutView, CsrfView, MediaFileView
 
 urlpatterns = [
     # Django 標準の管理画面（こちらは Django のセッション認証で動く）
@@ -29,10 +27,12 @@ urlpatterns = [
     path('token/refresh/', CookieRefreshView.as_view(), name='token_refresh'),  # POST: access を取り直す
     path('logout/', LogoutView.as_view(), name='logout'),                       # POST: Cookie を削除
     path('csrf/', CsrfView.as_view(), name='csrf'),                             # GET : csrftoken Cookie を配布
-]
 
-# 開発中（DEBUG=True）だけ、Django 自身が /media/ 以下のアップロード画像を配信する
-# - これがないと、フロントの <img src="http://localhost:8000/media/..."> が 404 になる
-# - 本番では Nginx などの Web サーバーが配信する想定
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # ---------------------------------------------------------
+    # アップロード画像の配信（改修案件08）
+    # - ログインしている持ち主にだけ返す（views/media.py）
+    # - 以前は DEBUG のときだけ static() で配信していて、ログインしなくても URL で見られた
+    # - <path:...>：「/」を含むパス（uploads/xxx.jpg）をそのまま受け取る
+    # ---------------------------------------------------------
+    path('media/<path:file_path>', MediaFileView.as_view(), name='media'),
+]

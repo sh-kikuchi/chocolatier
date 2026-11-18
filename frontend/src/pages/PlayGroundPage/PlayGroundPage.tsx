@@ -9,6 +9,8 @@ import TextTemplate from '../../components/playground/TextTemplate/TextTemplate'
 import { Link } from 'react-router-dom';
 import LongTextTemplate from '../../components/playground/LongTextTemplate/LongTextTemplate';
 import TagInputTemplate from '../../components/playground/TagInputTemplate/TagInputTemplate';
+import ImageCropperTemplate from '../../components/playground/ImageCropperTemplate/ImageCropperTemplate';
+
 
 function PlayGroundPage() {
 
@@ -32,6 +34,8 @@ function PlayGroundPage() {
         return <LongTextTemplate />;
       case 'tagInput':
         return <TagInputTemplate />;
+      case 'imageCropper':
+        return <ImageCropperTemplate />;
       default:
         return <div>Not Found</div>;
     }
@@ -49,6 +53,7 @@ function PlayGroundPage() {
         <BasicButton type="button" value="text" onclickAction={() => setCurrentTemplate('text')}>text</BasicButton>
         <BasicButton type="button" value="longText" onclickAction={() => setCurrentTemplate('longText')}>long text</BasicButton>
         <BasicButton type="button" value="tagInput" onclickAction={() => setCurrentTemplate('tagInput')}>tag input</BasicButton>
+        <BasicButton type="button" value="imageCropper" onclickAction={() => setCurrentTemplate('imageCropper')}>image cropper</BasicButton>
         <div><Link to="/signin">サインインはこちら</Link></div>
       </div>
       <div>
