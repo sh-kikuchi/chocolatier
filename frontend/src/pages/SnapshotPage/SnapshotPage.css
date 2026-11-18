@@ -24,6 +24,27 @@
   color: gray;
 }
 
+/* 1 段目：新規作成（左）と Zip ダウンロード（右）を両端に置く */
+.snapActions {
+  width: 600px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Zip ダウンロード（注意書き＋ボタン）を横に並べる */
+.downloadArea {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 100 件を超えたときの注意書き */
+.downloadNote {
+  font-size: 12px;
+  color: #0b2b24;
+}
+
 /* タグの絞り込み：チップを横に並べて、入りきらなければ折り返す */
 .tagFilter {
   width: 600px;
@@ -69,6 +90,23 @@
 .filePreview{
   width: 100px;
   object-fit: contain;
+}
+
+/* スナップ詳細・作成（トリミング後）の画像：大きく表示する（モーダルの幅 400px に収まる大きさ）
+   - 正方形でない昔の画像も、contain で全体が見える（はみ出さない） */
+.filePreviewLarge{
+  width: 300px;
+  max-height: 300px;
+}
+
+/* トリミング後のプレビューの下の「画像を選び直す」（目立たないリンク風のボタン） */
+.reselectImageButton {
+  border: none;
+  background: none;
+  color: #0b2b24;
+  text-decoration: underline;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 /* コメントの文字数カウンター（テキストエリアの右下に表示） */

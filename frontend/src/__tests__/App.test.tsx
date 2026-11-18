@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import WelcomePage from './pages/WelcomePage/WelcomePage';
+import WelcomePage from '../pages/WelcomePage/WelcomePage';
 
 // =====================================================
 // 最小のテスト：Welcome 画面が表示されること
