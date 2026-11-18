@@ -1,7 +1,7 @@
 # =========================================================
 # pagination.py
 # - 一覧 API を「何件ずつ・どう区切って返すか」を決めるファイル
-# - views.py の各 View で pagination_class に指定して使う
+# - views/snap.py の SnapList で pagination_class に指定して使う
 # =========================================================
 from rest_framework.pagination import CursorPagination
 
@@ -23,5 +23,5 @@ class SnapCursorPagination(CursorPagination):
     # ② 並び順（新しい順）
     #    - cursor 方式は「どこまで読んだか」を、この項目の値で覚える
     #      （例：「created_at が 10:00 より古いものから 12 件」）
-    #    - views.py の order_by より、こちらの並び順が優先される
+    #    - views/snap.py の order_by より、こちらの並び順が優先される
     ordering = '-created_at'

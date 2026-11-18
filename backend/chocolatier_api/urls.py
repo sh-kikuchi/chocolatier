@@ -9,6 +9,7 @@ from django.urls import path
 from .views import (
     SnapList,
     SnapCreate,
+    SnapZipDownload,
     SnapDetail,
     TagList,
     UserSignup,
@@ -21,6 +22,8 @@ urlpatterns = [
        path('snap/', SnapList.as_view(), name='snap-list'),
        # POST: スナップ新規作成（multipart: upload, comment）。投稿者はサーバー側で設定
        path('snap/create/', SnapCreate.as_view(), name='snap-create'),
+       # POST: 表示中の Snap の画像を Zip でダウンロード（本文：ids, tag）
+       path('snap/download/', SnapZipDownload.as_view(), name='snap-zip-download'),
        # GET / PATCH / DELETE: スナップ詳細・更新・削除
        # - <int:pk> は URL の数字部分を pk（主キー）として View に渡す
        # - 他人のスナップの pk を指定すると 404

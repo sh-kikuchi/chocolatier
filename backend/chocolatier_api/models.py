@@ -87,7 +87,7 @@ class File(models.Model):
 # - 全ユーザーで共通の表。同じ名前のタグは 1 行だけ作られる
 #   （alice の「旅行」と bob の「旅行」は同じ行を共有する）
 # - 絞り込みの候補には「自分の Snap に付いているタグ」だけを出すので、
-#   他のユーザーのタグが見えることはない（views.py の TagList で絞る）
+#   他のユーザーのタグが見えることはない（views/tag.py の TagList で絞る）
 # =========================================================
 class Tag(models.Model):
     id = models.BigAutoField(primary_key=True)  # BIGINT 主キー

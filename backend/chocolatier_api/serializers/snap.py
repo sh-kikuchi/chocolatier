@@ -1,9 +1,16 @@
-from rest_framework import serializers #シリアライザーをインポート
+# =========================================================
+# serializers/snap.py
+# - Snap（投稿）の翻訳係：一覧・詳細の形、作成・更新・削除、Zip ダウンロードの入力チェック
+# - タグの共通処理（clean_tag_names / set_snap_tags）もここに置く（Snap の作成・更新でだけ使うため）
+# =========================================================
 from django.conf import settings                             # settings.py の上限値を読むため
 from django.core.validators import FileExtensionValidator    # 拡張子チェック用の Django 標準バリデーター
-from .models import Snap, User, File, Tag
-from datetime import datetime
-import os
+from django.db import transaction                            # 作成をまとめて 1 つの処理にする（途中で失敗したら全部取り消す）
+from rest_framework import serializers
+
+from ..models import Snap, Tag
+from ..services.files import remove_physical_file, save_upload  # 画像ファイルの保存・後片付け（作業係）
+from ..services.tags import delete_unused_tags                 # 使われていないタグの片付け（作業係）
 
 # =========================================================
 # タグの共通処理（作成・更新の両方で使う）
@@ -34,7 +41,7 @@ def clean_tag_names(names):
                 f'タグ「{name}」が長すぎます。{settings.MAX_TAG_LENGTH}文字以内にしてください'
             )
 
-        #　重複を除く：まだ箱に入っていないタグだけ追加する
+        # 重複を除く：まだ箱に入っていないタグだけ追加する
         if name not in cleaned:
             cleaned.append(name)
 
@@ -61,11 +68,15 @@ def set_snap_tags(snap, names):
     #    set()：足りないものは追加し、余分なものは削除してくれる
     snap.tags.set(tags)
 
+    # ③ どのスナップにも付いていないタグを消す（改修案件08）
+    #    - 外したタグが、ほかのスナップ（ほかの利用者のものも含む）で使われていなければ消える
+    delete_unused_tags()
+
 # =========================================================
 # スナップモデルの一覧表示用シリアライザー
 # - get: 一覧取得：/snaps/
 # - get: 詳細取得：/snaps/1/
-# - putch: 更新：/snaps/1/ ※この時ファイル情報は更新しない
+# - 作成・更新のレスポンスも、この形で返す
 # =========================================================
 class SnapSerializer(serializers.ModelSerializer):
     filePath = serializers.CharField(source='file.path', read_only=True)
@@ -100,7 +111,7 @@ class SnapCreateSerializer(serializers.ModelSerializer):
     # - write_only=True：返すときは to_representation で SnapSerializer の tags を使う
     # ---------------------------------------------------------
     tags = serializers.ListField(
-        child = serializers.CharField(allow_blank=True),
+        child=serializers.CharField(allow_blank=True),
         required=False,
         write_only=True,
     )
@@ -108,7 +119,7 @@ class SnapCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Snap
         # - file は upload から自動生成
-        # - user はフロントから受け取らない（views.py の SnapCreate.perform_create で
+        # - user はフロントから受け取らない（views/snap.py の SnapCreate.perform_create で
         #   ログインユーザーを渡す）。受け取るとなりすまし投稿ができてしまうため
         fields = ['id', 'comment', 'upload', 'filePath', 'tags']
         # extra_kwargs：モデルから自動で作られるフィールドに、オプションを追加する
@@ -117,24 +128,23 @@ class SnapCreateSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'comment': {'max_length': settings.MAX_COMMENT_LENGTH},
         }
-    
+
     # ---------------------------------------------------------
     # validate_<フィールド名>：そのフィールドだけの独自チェック（チェック順 ③）
     # - value には、①② を通過した後の値（アップロードされたファイル）が入る
     # - 問題があれば ValidationError を発生させる → 400 で {"upload": ["..."]} が返る
     # - 問題がなければ、value をそのまま return する（return を忘れると None になる）
     # ---------------------------------------------------------
-    def validate_upload(self,value):
+    def validate_upload(self, value):
         # value.size：ファイルサイズ（バイト）
         if value.size > settings.MAX_UPLOAD_SIZE:
             max_mb = settings.MAX_UPLOAD_SIZE // (1024 * 1024)  # 表示用に MB に直す
             raise serializers.ValidationError(f'画像サイズは{max_mb}MB以下にしてください')
         return value
 
-    # tagsのチェック
+    # tags のチェック
     def validate_tags(self, value):
         return clean_tag_names(value)
-
 
     def create(self, validated_data):
         upload = validated_data.pop('upload')
@@ -143,16 +153,26 @@ class SnapCreateSerializer(serializers.ModelSerializer):
         #   「多対多には直接代入できない」という TypeError になる
         tag_names = validated_data.pop('tags', [])
 
-        # FileUploadSerializer を使ってファイル保存
-        file_serializer = FileUploadSerializer(data={'upload': upload})
-        file_serializer.is_valid(raise_exception=True)
-        file_obj = file_serializer.save()
+        # 画像の保存・Snap の作成・タグ付けを、1 つの処理（トランザクション）にまとめる（改修案件08）
+        # - transaction.atomic：中で失敗したら、DB への変更を全部取り消す（File の行だけが残らない）
+        # - 実ファイルは DB ではないので取り消されない → 失敗したら自分で消す
+        file_obj = None
+        try:
+            with transaction.atomic():
+                # ① 画像ファイルを保存して、File（DB の行）を作る（services/files.py の save_upload）
+                file_obj = save_upload(upload)
 
-        # Snap 作成
-        snap = Snap.objects.create(file=file_obj, **validated_data)
-        # Snap が DB に保存されて id ができてから、タグを付ける
-        # （中間テーブルには snap_id が必要なため、create より前には付けられない）
-        set_snap_tags(snap, tag_names)
+                # ② Snap 作成
+                snap = Snap.objects.create(file=file_obj, **validated_data)
+
+                # ③ Snap が DB に保存されて id ができてから、タグを付ける
+                #    （中間テーブルには snap_id が必要なため、create より前には付けられない）
+                set_snap_tags(snap, tag_names)
+        except Exception:
+            # ④ 途中で失敗したら、保存した実ファイルを消してから、失敗をそのまま伝える
+            if file_obj is not None:
+                remove_physical_file(file_obj.path)
+            raise
         return snap
 
     # 返すときの形
@@ -163,7 +183,7 @@ class SnapCreateSerializer(serializers.ModelSerializer):
 
 # =========================================================
 # スナップ更新用シリアライザー
-# -
+# - コメントとタグを更新する（画像は変えない）
 # =========================================================
 class SnapUpdateSerializer(serializers.ModelSerializer):
     # tags：付けるタグ名の配列（作成と同じ）
@@ -212,109 +232,32 @@ class SnapDeleteSerializer(serializers.ModelSerializer):
         fields = ['id', 'file', 'comment', 'created_at', 'updated_at']
 
     def delete(self, instance):
-        import os
-        from django.conf import settings
-
-        # 1. Snap に紐づく File を先に取得
-        file_obj = instance.file
-        print("DEBUG: Snap ID:", instance.id)
-        print("DEBUG: File object:", file_obj)
-
-        if file_obj:
-            # 2. 実ファイルパス確認
-            full_path = os.path.join(settings.MEDIA_ROOT, file_obj.path.replace("\\","/"))
-            print("DEBUG: Full file path:", full_path)
-            print("DEBUG: File exists?", os.path.exists(full_path))
-
-        # 3. Snap 削除
+        # Snap を消す
+        # - 画像（File の行と実ファイル）と、使われなくなったタグの後片付けは signals.py が行う（改修案件08）
+        #   → 管理画面や利用者の削除から消したときも、同じ後片付けが動く
         instance.delete()
-        print("DEBUG: Snap deleted")
-
-        # 4. File 削除は FileDeleteSerializer に委譲
-        if file_obj:
-            print("DEBUG: Calling FileDeleteSerializer.delete_file()")
-            FileDeleteSerializer.delete_file(file_obj)
-            print("DEBUG: FileDeleteSerializer finished")
-
-        return {"message": f"Snap {instance.id} and related file deleted successfully."}
 
 # =========================================================
-# ユーザーモデルのシリアライザー
+# Zip ダウンロード用シリアライザー
+# - POST /chocolatier_api/snap/download/ で受け取る値をチェックするだけ
+# - DB に保存しないので ModelSerializer ではなく Serializer を使う
+#   （モデルがないため、フィールドは自分で 1 つずつ宣言する）
 # =========================================================
-class UserSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = User
-        fields = ('id', 'username', 'email', 'password',)
-        #パスワードフィールドを書き込み専用にする
-        extra_kwargs = {'password':{'write_only': True}}
-    
-    #create時にcreate_userメソッドを使用
-    def create(self, validated_data):
-        user = User.objects.create_user(**validated_data)
-        return user
+class SnapZipDownloadSerializer(serializers.Serializer):
+    # ① ids：Zip に入れる Snap の ID の配列（必須）
+    #    - child：配列の 1 要素の型（整数）
+    #    - min_length=1：空の配列はダメ
+    #    - max_length：上限 100 件（settings.py の MAX_ZIP_DOWNLOAD）
+    ids = serializers.ListField(
+        child=serializers.IntegerField(),
+        min_length=1,
+        max_length=settings.MAX_ZIP_DOWNLOAD,
+    )
 
-# =========================================================
-# ファイルモデルのシリアライザー()
-# =========================================================
-class FileUploadSerializer(serializers.ModelSerializer):
-    upload = serializers.FileField(write_only=True, required=True)
-
-    class Meta:
-        model = File
-        fields = ['id', 'name', 'path', 'created_at', 'updated_at', 'upload']
-        read_only_fields = ['id', 'path', 'created_at', 'updated_at']
-
-    def create(self, validated_data):
-        upload = validated_data.pop('upload')
-        original_name, ext = os.path.splitext(upload.name)
-
-        # 現在日時を yyyymmddHHMMSS 形式で取得
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-
-        # 新しいファイル名
-        new_filename = f"{original_name}_{timestamp}{ext}"
-
-        # 保存先パス
-        from django.conf import settings
-        save_path = os.path.join("uploads", new_filename)  # media/uploads/filename
-
-        # 実際に保存
-        full_path = os.path.join(settings.MEDIA_ROOT, save_path)
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        with open(full_path, "wb+") as f:
-            for chunk in upload.chunks():
-                f.write(chunk)
-
-        # DB保存
-        file_obj = File.objects.create(
-            name=validated_data.get("name") or new_filename,
-            path=save_path
-        )
-        return file_obj
-
-class FileDeleteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = File
-        fields = []
-
-    @staticmethod
-    def delete_file(file_obj):
-        import os
-        from django.conf import settings
-
-        if not file_obj:
-            print("DEBUG: No file_obj to delete")
-            return
-
-        full_path = os.path.join(settings.MEDIA_ROOT, file_obj.path.replace("\\","/"))
-        print("DEBUG: Deleting file at path:", full_path)
-
-        if os.path.exists(full_path):
-            os.remove(full_path)
-            print("DEBUG: File removed from disk")
-        else:
-            print("DEBUG: File does not exist on disk")
-
-        # DB 削除
-        File.objects.filter(id=file_obj.id).delete()
-        print("DEBUG: File deleted from DB")
+    # ② tag：Zip の中のフォルダ名に使うタグ名（任意）
+    #    - required=False：「すべて」のときは送らない
+    #    - max_length：タグ名の上限と同じ 30 文字
+    tag = serializers.CharField(
+        required=False,
+        max_length=settings.MAX_TAG_LENGTH,
+    )
