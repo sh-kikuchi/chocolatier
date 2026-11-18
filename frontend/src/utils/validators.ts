@@ -2,7 +2,7 @@
 // 入力チェック（フロント側）
 // - Backend の settings.py と同じ上限値を使う。変えるときは両方そろえる
 //   （MAX_UPLOAD_SIZE / ALLOWED_IMAGE_EXTENSIONS / MAX_COMMENT_LENGTH /
-//     MAX_TAGS_PER_SNAP / MAX_TAG_LENGTH）
+//     MAX_TAGS_PER_SNAP / MAX_TAG_LENGTH / MAX_ZIP_DOWNLOAD）
 // - フロントのチェックは「送る前に早く気づかせる」ためのもの
 //   本当の守りは Backend のチェック（フロントのチェックは開発者ツール等で回避できるため）
 // - 各関数は、問題があればエラーメッセージ、問題なければ null を返す
@@ -27,24 +27,37 @@ export const MAX_TAGS_PER_SNAP = 10;
 // タグ 1 つの最大文字数
 export const MAX_TAG_LENGTH = 30;
 
+// 1 回の Zip ダウンロードに入れられる画像の最大数
+// - Backend の settings.py の MAX_ZIP_DOWNLOAD と同じ値にする
+// - 表示中の Snap がこれより多いときは、新しい順にこの数だけを送る
+export const MAX_ZIP_DOWNLOAD = 100;
+
 // =====================================================
 // 画像ファイルのチェック
-// - 拡張子とサイズを確認する
+// - 拡張子とサイズを、別々の関数に分けている（改修案件6）
+//   - 拡張子：画像を「選んだとき」（FileInput）。切り抜いても形式は選び直せないため
+//   - サイズ：「切り抜いた後・送る前」（SnapshotPage）。大きな写真でも、
+//     切り抜き・縮小すれば 5MB 以下になって投稿できるため
+//   → その時点で判断できることだけを、その時点でチェックする
 // - 「中身が本当に画像か」は Backend（Pillow）が確認する
 // =====================================================
-export const validateImageFile = (file: File): string | null => {
-  // 拡張子：ファイル名の最後の「.」より後ろを小文字で取り出す（"photo.JPG" → "jpg"）
+
+// 拡張子のチェック
+export const validateImageExtension = (file: File): string | null => {
+  // ファイル名の最後の「.」より後ろを小文字で取り出す（"photo.JPG" → "jpg"）
   const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
   if (!ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
     return `アップロードできるのは ${ALLOWED_IMAGE_EXTENSIONS.join(' / ')} の画像だけです`;
   }
+  return null;
+};
 
-  // サイズ：file.size はバイト単位
+// サイズのチェック（file.size はバイト単位）
+export const validateImageSize = (file: File): string | null => {
   if (file.size > MAX_UPLOAD_SIZE) {
     const maxMb = MAX_UPLOAD_SIZE / (1024 * 1024);
     return `画像サイズは ${maxMb}MB 以下にしてください`;
   }
-
   return null;
 };
 

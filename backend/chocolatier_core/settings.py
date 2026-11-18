@@ -174,7 +174,7 @@ REST_FRAMEWORK = {
     ),
 }
 
-# 認証 Cookie の設定（views.py の set_auth_cookies / authentication.py で使う）
+# 認証 Cookie の設定（views/auth.py の set_auth_cookies / authentication.py で使う）
 # - Cookie 名：ブラウザの DevTools > Application > Cookies にこの名前で表示される
 AUTH_COOKIE_ACCESS = 'access_token'
 AUTH_COOKIE_REFRESH = 'refresh_token'
@@ -188,7 +188,7 @@ AUTH_COOKIE_SAMESITE = 'Lax'
 
 # アクセストークン有効期限 = 60分
 # リフレッシュトークン有効期限 = 1日
-# - Cookie の max_age もこの値に合わせている（views.py の set_auth_cookies）
+# - Cookie の max_age もこの値に合わせている（views/auth.py の set_auth_cookies）
 # - access が切れたら、フロントの client.ts が自動で /token/refresh/ を呼ぶ
 # - refresh も切れたら（1日）再ログインが必要
 SIMPLE_JWT = {
@@ -201,9 +201,9 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # =========================================================
-# 入力チェックの上限値（serializers.py で使用）
+# 入力チェックの上限値（serializers/ で使用）
 # - フロントの src/utils/validators.ts でも同じ値を使うので、変えるときは両方そろえる
-# - 数字を serializers.py に直書きせず、ここにまとめることで変更漏れを防ぐ
+# - 数字を serializers/ に直書きせず、ここにまとめることで変更漏れを防ぐ
 # =========================================================
 # アップロード画像の最大サイズ（バイト）
 # - 5 * 1024 * 1024 = 5MB（要件定義書「画像サイズ制限：最大 5MB / 枚」）
@@ -218,10 +218,13 @@ ALLOWED_IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp']
 MAX_COMMENT_LENGTH = 1000
 
 # 1 つの Snap に付けられるタグの最大数
-# - 空のタグと重複を除いた「後」の個数で数える（serializers.py の clean_tag_names）
+# - 空のタグと重複を除いた「後」の個数で数える（serializers/snap.py の clean_tag_names）
 MAX_TAGS_PER_SNAP = 10
 
 # タグ 1 つの最大文字数
 # - models.py の Tag.name（max_length=30）と同じ値にする
 #   （モデル側は DB の列の長さ、こちらはシリアライザーでの入力チェック用）
 MAX_TAG_LENGTH = 30
+
+# 一回でダウンロードできるファイル数
+MAX_ZIP_DOWNLOAD = 100

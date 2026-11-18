@@ -5,6 +5,7 @@ import SignInPage from './pages/SignInPage/SignInPage';
 import SnapshotPage from './pages/SnapshotPage/SnapshotPage';
 import Layout from './components/commons/Layout/Layout';
 import ProtectedRoute from './components/commons/ProtectedRoute/ProtectedRoute';
+import GuestRoute from './components/commons/GuestRoute/GuestRoute';
 import PlayGroundPage from './pages/PlayGroundPage/PlayGroundPage';
 import WelcomePage from './pages/WelcomePage/WelcomePage';
 
@@ -18,10 +19,13 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="/snaps" element={<SnapshotPage />} />
             </Route>
+            {/* ログインしていない人のためのページ（ログイン中なら /snaps へ移動） */}
+            <Route element={<GuestRoute />}>
+              <Route path="/signin" element={<SignInPage />} />
+              <Route path="/" element={<WelcomePage />} />
+            </Route>
             {/* 誰でも見られるページ */}
-            <Route path="/signin" element={<SignInPage />} />
             <Route path="/playground" element={<PlayGroundPage />} />
-            <Route path="/" element={<WelcomePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -61,3 +61,25 @@ export const getApiErrorMessages = (error: unknown): string[] => {
 
   return ['エラーが発生しました'];
 };
+
+// =====================================================
+// Blob で受け取る API のエラーを、メッセージに変換する
+// - responseType: 'blob'（Zip のダウンロードなど）で呼ぶと、
+//   エラーのときの本文（{ "detail": "..." } など）も Blob で届く
+// - Blob のままだと中身を読めないので、① 文字にして ② JSON に戻してから
+//   getApiErrorMessages に渡す
+// - Blob を読むのは非同期なので、この関数も async（呼ぶ側は await する）
+// =====================================================
+export const getApiErrorMessagesFromBlob = async (error: unknown): Promise<string[]> => {
+  if (axios.isAxiosError(error) && error.response?.data instanceof Blob) {
+    try {
+      // ① Blob → 文字列  ② 文字列 → オブジェクト
+      error.response.data = JSON.parse(await error.response.data.text());
+    } catch {
+      // JSON でない本文（500 の HTML など）は読まずに捨てる
+      // → getApiErrorMessages が、ステータスコードから決まったメッセージを返す
+      error.response.data = null;
+    }
+  }
+  return getApiErrorMessages(error);
+};

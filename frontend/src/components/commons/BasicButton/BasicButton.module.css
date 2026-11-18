@@ -17,4 +17,10 @@
   filter: brightness(1.1);
 }
 
+/* 押せないとき（disabled）：薄くして、カーソルも「押せない」形にする */
+.chocolatierBasicButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 
