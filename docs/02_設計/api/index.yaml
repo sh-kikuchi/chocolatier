@@ -1,11 +1,15 @@
 openapi: 3.0.3
 info:
   title: Chocolatier API
-  version: 3.0.0
+  version: 4.0.0
   description: |
     Django REST Framework + SimpleJWT の API。
 
     ## 変更履歴
+    - 4.0.0（2026-11-19）：改修案件08。**画像（/media/）はログインした持ち主だけが取得できる**ようになった。
+      Snap の PUT は廃止（405）。削除の 204 は本文なし。登録でメールアドレスの重複を禁止。
+      使われなくなったタグは自動で削除される
+    - 3.1.0（2026-11-13）：表示中の画像を Zip でダウンロードする API（改修案件5）を追加。既存の API は変更なし
     - 3.0.0（2026-10-03）：タグ（改修案件3）と、一覧のページング（改修案件4）を追加。
       **Snap 一覧のレスポンスが配列から `{next, previous, results}` に変わった**。
       作成・更新のレスポンスが、一覧と同じ Snap の形になった
@@ -41,11 +45,18 @@ info:
     - cursor 方式なので、読んでいる途中で投稿が増えたり減ったりしても、重複や抜けが起きない。
     - `?tag=` で絞り込んだときも、`next` の URL に `tag` が引き継がれる。
 
+    ## Zip ダウンロード（改修案件5）
+    - 画面に表示中の Snap の ID（最大 100 件）を送ると、画像を 1 つのフォルダに入れた Zip を返す。
+    - 送られた ID のうち、自分の Snap だけが入る（他人の ID は黙って除外）。
+    - 画像は圧縮しない（`ZIP_STORED`）。実ファイルが消えている画像は飛ばす。
+
     ## 詳しい解説
-    - docs/03_articles/07_cookieAuth.md（認証・curl / Postman での呼び方）
-    - docs/03_articles/08_validation.md（入力チェック）
-    - docs/03_articles/10_tags.md（タグ）
-    - docs/03_articles/11_infiniteScroll.md（ページングと無限スクロール）
+    - docs/03_開発/03_認証.md（認証・curl / Postman での呼び方）
+    - docs/03_開発/06_入力チェック.md（入力チェック）
+    - docs/03_開発/07_タグ.md（タグ）
+    - docs/03_開発/08_無限スクロール.md（ページングと無限スクロール）
+    - docs/03_開発/09_Zipダウンロード.md（Zip ダウンロード）
+    - docs/03_開発/05_スナップAPIと画像.md（スナップの作成・削除・画像の配信）
 
 servers:
   - url: http://localhost:8000
@@ -236,6 +247,9 @@ paths:
                 email:
                   type: string
                   format: email
+                  description: |
+                    すでに登録されているアドレスは使えない（大文字・小文字の違いも同じとみなす）。
+                    空文字は重複を見ない（改修案件08）
                   example: bob@example.com
                 password:
                   type: string
@@ -251,7 +265,16 @@ paths:
               example:
                 message: ユーザー登録が完了しました
         "400":
-          $ref: '#/components/responses/ValidationError'
+          description: 入力値エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrors'
+              examples:
+                duplicateEmail:
+                  summary: メールアドレスが登録済み
+                  value:
+                    email: [このメールアドレスはすでに登録されています]
         "401":
           $ref: '#/components/responses/Unauthorized'
         "403":
@@ -394,6 +417,96 @@ paths:
         "403":
           $ref: '#/components/responses/CsrfFailed'
 
+  /chocolatier_api/snap/download/:
+    post:
+      tags: [Snap]
+      summary: 表示中の Snap の画像を Zip でダウンロード
+      description: |
+        送られた ID の Snap のうち、**ログインユーザー自身の Snap だけ** の画像を Zip にまとめて返す
+        （他人の ID・存在しない ID は黙って除外する）。
+        - Zip の中は 1 つのフォルダ：`tag` を送ればタグ名、送らなければ `すべて`
+          （例：`旅行/photo_20261001120000.jpg`）
+        - フォルダ名に使えない記号（`\ / : * ? " < > |`）は `_` に置き換え、前後の空白と `.` を取る。
+          何も残らなければ `すべて`（`/` や `..` で Zip の中のフォルダがずれるのを防ぐため）
+        - 画像は圧縮しない（`ZIP_STORED`）。実ファイルが消えている画像は飛ばす
+        - ファイル名（`Content-Disposition`）は `<フォルダ名>.zip`。日本語は `filename*=utf-8''...` の形になる。
+          ただし CORS の設定で公開していないため、ブラウザの JS からは読めない（フロントは自分でファイル名を決める）
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  description: Zip に入れる Snap の ID（1〜100 件）
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: integer
+                  example: [12, 11, 8]
+                tag:
+                  type: string
+                  maxLength: 30
+                  description: Zip の中のフォルダ名に使うタグ名（任意）。「すべて」のときは送らない
+                  example: 旅行
+      responses:
+        "200":
+          description: Zip ファイル
+          headers:
+            Content-Disposition:
+              description: 保存するときのファイル名
+              schema:
+                type: string
+              example: attachment; filename*=utf-8''%E6%97%85%E8%A1%8C.zip
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: |
+            入力値エラー。
+            ※ ListField の件数のエラーは DRF に日本語訳がないため、英語のメッセージになる
+            （フロントは 100 件までしか送らないので、通常は表示されない）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrors'
+              examples:
+                empty:
+                  summary: ids が空
+                  value:
+                    ids: [Ensure this field has at least 1 elements.]
+                tooMany:
+                  summary: ids が 101 件以上
+                  value:
+                    ids: [Ensure this field has no more than 100 elements.]
+                notInteger:
+                  summary: ids に数字以外
+                  value:
+                    ids:
+                      "0": [有効な整数を入力してください。]
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/CsrfFailed'
+        "404":
+          description: |
+            Zip に入れられる画像が 1 枚もない
+            （自分の Snap が 1 件もない、または実ファイルがすべて消えている）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+              example:
+                detail: ダウンロードできる画像がありません
+
   /chocolatier_api/snap/{id}/:
     parameters:
       - $ref: '#/components/parameters/SnapId'
@@ -415,8 +528,10 @@ paths:
       tags: [Snap]
       summary: Snap 更新（コメント・タグ）
       description: |
-        コメントとタグを更新する。画像は変更できない。PUT も同じ動きをする。
+        コメントとタグを更新する。画像は変更できない。
         送らなかった項目は変わらない（`tags` を送らなければタグはそのまま）。
+        外したタグがどのスナップにも付いていなければ、タグ自体も削除される（改修案件08）。
+        **PUT は受け付けない**（405 Method Not Allowed。改修案件08）。
       security:
         - cookieAuth: []
           csrfToken: []
@@ -479,19 +594,61 @@ paths:
       summary: Snap 削除
       description: |
         Snap と、紐づく画像ファイル（DB と実ファイル）を削除する。
-        タグの紐付け（snap_tags）も消える。タグ自体（tags）は残る。
+        タグの紐付け（snap_tags）も消え、どのスナップにも付いていないタグはタグ自体も削除される（改修案件08）。
+        画像ファイルの後片付けは、管理画面から消したときや、利用者ごと消したときも同じように行われる。
       security:
         - cookieAuth: []
           csrfToken: []
       responses:
         "204":
-          description: 削除された
+          description: "削除された（本文なし。改修案件08 で message の本文を返さなくなった）"
         "401":
           $ref: '#/components/responses/Unauthorized'
         "403":
           $ref: '#/components/responses/CsrfFailed'
         "404":
           $ref: '#/components/responses/NotFound'
+
+  # =========================================================
+  # Media（改修案件08）
+  # =========================================================
+  /media/{path}:
+    get:
+      tags: [Snap]
+      summary: アップロード画像の取得（持ち主だけ）
+      description: |
+        Snap の `filePath`（例：`uploads/photo_20261001120000.jpg`）を `/media/` の後ろに付けて取得する。
+        画面の `<img src>` から呼ばれ、ブラウザが Cookie（access_token）を自動で付ける。
+        - ログインしていない → 401
+        - 他人の画像・存在しない画像 → 404（存在すること自体を知らせない）
+        - DB に登録されている画像のパスだけを返す（`../` などで別のファイルは読めない）
+        以前（v3 まで）は、開発用の設定で **ログインなしでも** 取得できた。
+      parameters:
+        - in: path
+          name: path
+          required: true
+          description: Snap の filePath（`/` を含む）
+          schema:
+            type: string
+            example: uploads/photo_20261001120000.jpg
+      responses:
+        "200":
+          description: 画像（Content-Type は拡張子から決まる）
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          description: 他人の画像、または存在しない画像
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Detail'
+              example:
+                detail: 見つかりませんでした。
 
   # =========================================================
   # Tag
@@ -633,7 +790,7 @@ components:
           example: 1
         filePath:
           type: string
-          description: MEDIA_URL（/media/）からの相対パス
+          description: MEDIA_URL（/media/）からの相対パス。取得は GET /media/{path}（持ち主だけ）
           example: uploads/photo_20260930120000.png
         comment:
           type: string
